@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BuildDir = Join-Path $ProjectRoot 'build'
 $StageDir = Join-Path $BuildDir 'FriendsGhostLeaderboard'
-$Output = Join-Path $BuildDir 'FriendsGhostLeaderboard-0.2.0.op'
+$Output = Join-Path $BuildDir 'FriendsGhostLeaderboard-0.3.0.op'
 $PluginDir = 'C:\Users\danho\OpenplanetNext\Plugins\FriendsGhostLeaderboard'
 
 if (Test-Path -LiteralPath $StageDir) { Remove-Item -LiteralPath $StageDir -Recurse -Force }

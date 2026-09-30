@@ -2,7 +2,7 @@
 name = "Friends Ghost Leaderboard"
 author = "Dan H"
 category = "Race"
-version = "0.2.0"
+version = "0.3.0"
 siteid = 0
 
 [script]

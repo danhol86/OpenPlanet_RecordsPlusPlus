@@ -1,22 +1,141 @@
 const string PluginName = "Friends Ghost Leaderboard";
+const string NativeRecordsPageUid = "FriendsNativeRecords";
+
+const string NativeRecordsManialink = """
+ #Struct K_TMGame_Record_Record { Integer Rank; Text AccountId; Text DisplayName; Integer Score; }
+ #Struct K_TMGame_Record_Records { Text ZoneName; Integer WorstScore; Boolean IsFull; Integer Type; K_TMGame_Record_Record[] Records; }
+
+Integer FriendsLeaderboard_Digit(Text _Digit) {
+    if (_Digit == "0") return 0;
+    if (_Digit == "1") return 1;
+    if (_Digit == "2") return 2;
+    if (_Digit == "3") return 3;
+    if (_Digit == "4") return 4;
+    if (_Digit == "5") return 5;
+    if (_Digit == "6") return 6;
+    if (_Digit == "7") return 7;
+    if (_Digit == "8") return 8;
+    if (_Digit == "9") return 9;
+    return 0;
+}
+
+main() {
+    declare K_TMGame_Record_Records[] TMGame_Record_ZonesRecords for ClientUI;
+    declare Integer TMGame_Record_ZonesRecordsUpdate for ClientUI;
+    declare Text[][] MLHook_Inbound_FriendsNativeRecords for ClientUI = [];
+
+    declare K_TMGame_Record_Record[] FriendsRecords;
+    declare Boolean FriendsEnabled = False;
+    declare Boolean Dirty = False;
+    declare Integer LastSharedUpdate = -987654;
+
+    while (True) {
+        yield;
+
+        foreach (Event in MLHook_Inbound_FriendsNativeRecords) {
+            if (Event.count <= 0) continue;
+
+            if (Event[0] == "Reset") {
+                FriendsRecords = [];
+                FriendsEnabled = True;
+                Dirty = True;
+            } else if (Event[0] == "Add" && Event.count >= 6) {
+                declare Integer Rank = 0;
+                declare Integer Score = 0;
+                declare Boolean ReadingScore = False;
+                for (I, 3, Event.count - 1) {
+                    if (Event[I] == "|") {
+                        ReadingScore = True;
+                    } else if (ReadingScore) {
+                        Score = Score * 10 + FriendsLeaderboard_Digit(Event[I]);
+                    } else {
+                        Rank = Rank * 10 + FriendsLeaderboard_Digit(Event[I]);
+                    }
+                }
+                declare K_TMGame_Record_Record Record = K_TMGame_Record_Record {
+                    Rank = Rank,
+                    AccountId = Event[1],
+                    DisplayName = Event[2],
+                    Score = Score
+                };
+                FriendsRecords.add(Record);
+                Dirty = True;
+            } else if (Event[0] == "Disable") {
+                FriendsEnabled = False;
+                Dirty = True;
+            } else if (Event[0] == "Apply") {
+                Dirty = True;
+            }
+        }
+        MLHook_Inbound_FriendsNativeRecords = [];
+
+        declare Integer FriendsZoneIx = -1;
+        foreach (Ix => Zone in TMGame_Record_ZonesRecords) {
+            if (Zone.ZoneName == "FRIENDS") {
+                FriendsZoneIx = Ix;
+                break;
+            }
+        }
+
+        // Nadeo periodically rebuilds the shared records array. Re-apply our
+        // zone whenever that happens, as well as whenever friend data changes.
+        if (FriendsEnabled && (Dirty || FriendsZoneIx < 0 || LastSharedUpdate != TMGame_Record_ZonesRecordsUpdate)) {
+            declare Integer WorstScore = 0;
+            foreach (Ix => Record in FriendsRecords) {
+                if (Record.Score > WorstScore) WorstScore = Record.Score;
+            }
+
+            declare K_TMGame_Record_Records FriendsZone = K_TMGame_Record_Records {
+                ZoneName = "FRIENDS",
+                WorstScore = WorstScore,
+                IsFull = True,
+                Type = 1,
+                Records = FriendsRecords
+            };
+
+            // Keep FRIENDS directly after WORLD (the first native zone), so it
+            // is only one native Records arrow press away from the default view.
+            if (FriendsZoneIx == 1 || (FriendsZoneIx == 0 && TMGame_Record_ZonesRecords.count == 1)) {
+                TMGame_Record_ZonesRecords[FriendsZoneIx] = FriendsZone;
+            } else {
+                if (FriendsZoneIx >= 0) TMGame_Record_ZonesRecords.removekey(FriendsZoneIx);
+
+                declare K_TMGame_Record_Records[] ReorderedZones;
+                if (TMGame_Record_ZonesRecords.count <= 0) {
+                    ReorderedZones.add(FriendsZone);
+                } else {
+                    ReorderedZones.add(TMGame_Record_ZonesRecords[0]);
+                    ReorderedZones.add(FriendsZone);
+                    for (I, 1, TMGame_Record_ZonesRecords.count - 1) {
+                        ReorderedZones.add(TMGame_Record_ZonesRecords[I]);
+                    }
+                }
+                TMGame_Record_ZonesRecords = ReorderedZones;
+            }
+
+            TMGame_Record_ZonesRecordsUpdate += 1;
+            LastSharedUpdate = TMGame_Record_ZonesRecordsUpdate;
+            Dirty = False;
+        } else if (!FriendsEnabled && FriendsZoneIx >= 0) {
+            TMGame_Record_ZonesRecords.removekey(FriendsZoneIx);
+            TMGame_Record_ZonesRecordsUpdate += 1;
+            LastSharedUpdate = TMGame_Record_ZonesRecordsUpdate;
+            Dirty = False;
+        } else {
+            LastSharedUpdate = TMGame_Record_ZonesRecordsUpdate;
+        }
+    }
+}
+""";
 
 [Setting hidden]
-bool S_ShowWindow = true;
+bool S_ShowLegacyWindow = false;
 
 [Setting category="General" name="Auto refresh friend times"]
 bool S_AutoRefresh = true;
 
 [Setting category="General" name="Refresh interval (seconds)" min=5 max=300]
 uint S_RefreshSeconds = 10;
-
-[Setting category="Ghosts" name="Hide PB ghost while racing a friend"]
-bool S_HidePBGhostWhenRacingFriend = true;
-
-[Setting category="General" name="Auto-load fastest friend ghosts"]
-bool S_AutoLoadGhosts = false;
-
-[Setting category="General" name="Maximum auto-loaded ghosts" min=0 max=20]
-uint S_MaxAutoLoadedGhosts = 3;
 
 class FriendEntry {
     string AccountId;
@@ -57,40 +176,55 @@ class FriendEntry {
     }
 }
 
+class NativeRecordRow {
+    uint Rank;
+    string WsId;
+    string Name;
+    uint TimeMs;
+    bool IsLocal;
+
+    NativeRecordRow(const string &in wsid, const string &in name, uint timeMs, bool isLocal) {
+        WsId = wsid;
+        Name = name;
+        TimeMs = timeMs;
+        IsLocal = isLocal;
+    }
+}
+
 array<FriendEntry@> g_Friends;
 string g_MapUid = "";
 uint g_MapGeneration = 0;
 bool g_Refreshing = false;
 bool g_FriendsLoaded = false;
 bool g_RefreshRequested = false;
+bool g_NativeRecordsInjected = false;
 uint g_LastRefreshMs = 0;
 int64 g_LastRefreshStamp = 0;
 uint g_PlayerPBTime = 0;
 int g_LastUISequence = -1;
-bool g_PBGhostHiddenByPlugin = false;
 string g_Status = "Open a map to load friend times.";
 
 void Main() {
     trace(PluginName + " loaded");
+    startnew(InitNativeRecordsIntegration);
     startnew(WatchMapLoop);
 }
 
 void OnDestroyed() {
-    RestorePBGhostIfNeeded();
+    DisableNativeFriendsZone();
+    MLHook::UnregisterMLHooksAndRemoveInjectedML();
 }
 
 void OnDisabled() {
-    RestorePBGhostIfNeeded();
+    DisableNativeFriendsZone();
+    MLHook::UnregisterMLHooksAndRemoveInjectedML();
 }
 
 void RenderMenu() {
-    if (UI::MenuItem("Friends Ghost Leaderboard", "", S_ShowWindow)) {
-        S_ShowWindow = !S_ShowWindow;
-    }
 }
 
 void RenderInterface() {
-    if (!S_ShowWindow) return;
+    if (!S_ShowLegacyWindow) return;
     if (GetCurrentMapUid().Length == 0) return;
 
     if (!UI::Begin("Friends Ghost Leaderboard")) {
@@ -120,12 +254,6 @@ void RenderInterface() {
     if (g_LastRefreshStamp > 0) {
         UI::SameLine();
         UI::Text("Last updated " + Time::FormatString("%H:%M:%S", g_LastRefreshStamp));
-    }
-
-    UI::SameLine();
-    if (UI::Checkbox("Hide PB ghost vs friend", S_HidePBGhostWhenRacingFriend)) {
-        if (S_HidePBGhostWhenRacingFriend && AnyFriendGhostLoaded()) HidePBGhostIfNeeded();
-        if (!S_HidePBGhostWhenRacingFriend) RestorePBGhostIfNeeded();
     }
 
     if (g_Status.Length > 0) UI::Text(g_Status);
@@ -240,7 +368,6 @@ void WatchMapLoop() {
 }
 
 void ResetMapState() {
-    RestorePBGhostIfNeeded();
     for (uint i = 0; i < g_Friends.Length; i++) {
         g_Friends[i].ResetRecord();
     }
@@ -249,6 +376,7 @@ void ResetMapState() {
     g_PlayerPBTime = 0;
     g_LastUISequence = -1;
     g_Status = g_MapUid.Length == 0 ? "Open a map to load friend times." : "Loading friends and current-map times...";
+    if (g_MapUid.Length > 0) SyncNativeFriendsZone();
 }
 
 void RefreshAll() {
@@ -271,7 +399,7 @@ void RefreshAll() {
         g_LastRefreshMs = Time::Now;
         g_LastRefreshStamp = Time::Stamp;
         g_Status = "";
-        if (S_AutoLoadGhosts) AutoLoadFastestGhosts(generation);
+        SyncNativeFriendsZone();
     }
     g_Refreshing = false;
 }
@@ -308,6 +436,7 @@ void RefreshRecordsOnly() {
         g_LastRefreshMs = Time::Now;
         g_LastRefreshStamp = Time::Stamp;
         g_Status = "";
+        SyncNativeFriendsZone();
     }
     g_Refreshing = false;
 }
@@ -537,7 +666,6 @@ bool LoadGhost(FriendEntry@ f) {
     f.GhostInstanceId = ps.GhostMgr.Ghost_Add(task.Ghost, true);
     f.GhostLoaded = true;
     f.GhostBusy = false;
-    HidePBGhostIfNeeded();
     trace("Loaded friend ghost: " + f.Name + " (" + FormatTime(f.TimeMs) + ")");
     ps.DataFileMgr.TaskResult_Release(task.Id);
     return true;
@@ -554,17 +682,6 @@ void UnloadGhost(FriendEntry@ f) {
         }
     }
     f.GhostLoaded = false;
-    if (!AnyFriendGhostLoaded()) RestorePBGhostIfNeeded();
-}
-
-void AutoLoadFastestGhosts(uint generation) {
-    if (!Permissions::PlayRecords() || S_MaxAutoLoadedGhosts == 0) return;
-    uint loaded = 0;
-    for (uint i = 0; i < g_Friends.Length && loaded < S_MaxAutoLoadedGhosts; i++) {
-        if (generation != g_MapGeneration) return;
-        if (!g_Friends[i].HasRecord || g_Friends[i].GhostLoaded || g_Friends[i].ReplayUrl.Length == 0) continue;
-        if (LoadGhost(g_Friends[i])) loaded++;
-    }
 }
 
 CSmArenaRulesMode@ GetRulesMode() {
@@ -646,23 +763,106 @@ void RefreshAfterFinishedRun() {
     else g_RefreshRequested = true;
 }
 
-bool AnyFriendGhostLoaded() {
-    for (uint i = 0; i < g_Friends.Length; i++) {
-        if (g_Friends[i].GhostLoaded) return true;
+void InitNativeRecordsIntegration() {
+    MLHook::InjectManialinkToPlayground(NativeRecordsPageUid, NativeRecordsManialink, true);
+    g_NativeRecordsInjected = true;
+
+    // Give MLHook a moment to create the page when the plugin is hot-loaded in a map.
+    sleep(500);
+    if (GetCurrentMapUid().Length > 0) SyncNativeFriendsZone();
+}
+
+void DisableNativeFriendsZone() {
+    if (!g_NativeRecordsInjected) return;
+    auto app = GetApp();
+    if (app.Network is null || app.Network.ClientManiaAppPlayground is null) return;
+    MLHook::Queue_MessageManialinkPlayground(NativeRecordsPageUid, {"Disable"});
+}
+
+void SyncNativeFriendsZone() {
+    if (!g_NativeRecordsInjected || GetCurrentMapUid().Length == 0) return;
+    auto app = GetApp();
+    if (app.Network is null || app.Network.ClientManiaAppPlayground is null) return;
+
+    array<NativeRecordRow@> rows = BuildNativeRecordRows();
+    MLHook::Queue_MessageManialinkPlayground(NativeRecordsPageUid, {"Reset"});
+
+    for (uint i = 0; i < rows.Length; i++) {
+        NativeRecordRow@ row = rows[i];
+        array<string> message = {"Add", row.WsId, row.Name};
+        AppendIntegerDigits(message, row.Rank);
+        message.InsertLast("|");
+        AppendIntegerDigits(message, row.TimeMs);
+        MLHook::Queue_MessageManialinkPlayground(NativeRecordsPageUid, message);
     }
-    return false;
+
+    MLHook::Queue_MessageManialinkPlayground(NativeRecordsPageUid, {"Apply"});
 }
 
-void HidePBGhostIfNeeded() {
-    if (!S_HidePBGhostWhenRacingFriend || g_PBGhostHiddenByPlugin) return;
-    MLHook::Queue_SH_SendCustomEvent("TMGame_Record_TogglePB", {});
-    g_PBGhostHiddenByPlugin = true;
+void AppendIntegerDigits(array<string> &inout message, uint value) {
+    uint divisor = 1;
+    while (value / divisor >= 10 && divisor <= 100000000) divisor *= 10;
+    while (divisor > 0) {
+        message.InsertLast(tostring((value / divisor) % 10));
+        divisor /= 10;
+    }
 }
 
-void RestorePBGhostIfNeeded() {
-    if (!g_PBGhostHiddenByPlugin) return;
-    MLHook::Queue_SH_SendCustomEvent("TMGame_Record_TogglePB", {});
-    g_PBGhostHiddenByPlugin = false;
+array<NativeRecordRow@> BuildNativeRecordRows() {
+    array<NativeRecordRow@> allRows;
+
+    for (uint i = 0; i < g_Friends.Length; i++) {
+        FriendEntry@ f = g_Friends[i];
+        if (!f.HasRecord || f.WsId.Length == 0 || f.TimeMs == 0) continue;
+        allRows.InsertLast(NativeRecordRow(f.WsId, f.Name, f.TimeMs, false));
+    }
+
+    auto localPlayer = GetApp().LocalPlayerInfo;
+    if (g_PlayerPBTime > 0 && localPlayer !is null) {
+        string wsid = localPlayer.WebServicesUserId;
+        string name = string(localPlayer.Name);
+        if (wsid.Length > 0) allRows.InsertLast(NativeRecordRow(wsid, name, g_PlayerPBTime, true));
+    }
+
+    for (uint i = 0; i < allRows.Length; i++) {
+        for (uint j = i + 1; j < allRows.Length; j++) {
+            if (allRows[j].TimeMs < allRows[i].TimeMs
+                || (allRows[j].TimeMs == allRows[i].TimeMs && allRows[j].Name.ToLower() < allRows[i].Name.ToLower())) {
+                NativeRecordRow@ tmp = allRows[i];
+                @allRows[i] = allRows[j];
+                @allRows[j] = tmp;
+            }
+        }
+    }
+
+    for (uint i = 0; i < allRows.Length; i++) {
+        if (i == 0 || allRows[i].TimeMs != allRows[i - 1].TimeMs) allRows[i].Rank = i + 1;
+        else allRows[i].Rank = allRows[i - 1].Rank;
+    }
+
+    if (allRows.Length <= 8) return allRows;
+
+    array<NativeRecordRow@> shown;
+    for (uint i = 0; i < 5; i++) shown.InsertLast(allRows[i]);
+
+    int localIx = -1;
+    for (uint i = 0; i < allRows.Length; i++) {
+        if (allRows[i].IsLocal) {
+            localIx = int(i);
+            break;
+        }
+    }
+
+    if (localIx < 5) {
+        for (uint i = 5; i < 8; i++) shown.InsertLast(allRows[i]);
+        return shown;
+    }
+
+    int start = localIx - 1;
+    if (start < 5) start = 5;
+    if (start + 3 > int(allRows.Length)) start = int(allRows.Length) - 3;
+    for (int i = start; i < start + 3; i++) shown.InsertLast(allRows[i]);
+    return shown;
 }
 
 string FormatTime(uint ms) {

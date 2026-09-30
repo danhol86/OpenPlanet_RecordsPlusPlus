@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+- Replaced the separate floating leaderboard with a genuine `FRIENDS` zone in Trackmania's native Records panel.
+- FRIENDS uses the same layout, fonts, ranking rows, ghost eye controls and replay behaviour as WORLD/region records.
+- Includes the local player's PB alongside friend PBs.
+- Places FRIENDS directly after WORLD in native zone navigation.
+- Native ghost toggle verified in-game against a friend PB.
+- Trackmania's own `HIDE PB GHOST` checkbox is now used instead of custom PB-ghost state handling.
+- Friend times still refresh every 10 seconds and after a finished run.
+
 ## 0.2.0
 
 - Redesigned compact friend comparison leaderboard.
