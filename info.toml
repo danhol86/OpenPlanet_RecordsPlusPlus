@@ -1,0 +1,12 @@
+[meta]
+name = "Friends Ghost Leaderboard"
+author = "Dan H"
+category = "Race"
+version = "0.1.0"
+siteid = 0
+
+[script]
+dependencies = ["MLHook"]
+optional_dependencies = []
+timeout = 0
+
