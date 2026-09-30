@@ -59,6 +59,7 @@ string g_MapUid = "";
 uint g_MapGeneration = 0;
 bool g_Refreshing = false;
 bool g_FriendsLoaded = false;
+bool g_RefreshRequested = false;
 uint g_LastRefreshMs = 0;
 string g_Status = "Open a map to load friend times.";
 
@@ -190,10 +191,10 @@ void WatchMapLoop() {
             g_MapUid = uid;
             g_MapGeneration++;
             ResetMapState();
-
-            if (uid.Length > 0) {
-                startnew(RefreshAll);
-            }
+            g_RefreshRequested = uid.Length > 0;
+        } else if (uid.Length > 0 && g_RefreshRequested && !g_Refreshing) {
+            g_RefreshRequested = false;
+            startnew(RefreshAll);
         } else if (uid.Length > 0 && S_AutoRefresh && !g_Refreshing && g_LastRefreshMs > 0) {
             uint refreshSeconds = S_RefreshSeconds < 10 ? 10 : S_RefreshSeconds;
             uint intervalMs = refreshSeconds * 1000;
@@ -279,9 +280,14 @@ bool LoadFriendList(uint generation) {
 
     auto userMgr = ps.UserMgr;
     auto task = userMgr.Friend_GetList(userMgr.Users[0].Id);
+    bool cancelled = false;
     while (task.IsProcessing) {
-        if (generation != g_MapGeneration) return false;
+        if (generation != g_MapGeneration) cancelled = true;
         yield();
+    }
+    if (cancelled) {
+        userMgr.TaskResult_Release(task.Id);
+        return false;
     }
 
     if (task.HasFailed || !task.HasSucceeded) {
@@ -301,7 +307,14 @@ bool LoadFriendList(uint generation) {
 
         string name = string(fr.DisplayName);
         if (name.Length == 0) name = wsid;
-        nextFriends.InsertLast(FriendEntry(fr.AccountId, wsid, name, fr.Presence, fr.Relationship));
+        FriendEntry@ next = FriendEntry(fr.AccountId, wsid, name, fr.Presence, fr.Relationship);
+        FriendEntry@ previous = FindFriendByWsId(wsid);
+        if (previous !is null) {
+            next.GhostLoaded = previous.GhostLoaded;
+            next.GhostBusy = previous.GhostBusy;
+            next.GhostInstanceId = previous.GhostInstanceId;
+        }
+        nextFriends.InsertLast(next);
     }
 
     userMgr.TaskResult_Release(task.Id);
@@ -342,9 +355,14 @@ void LoadRecordsForCurrentFriends(const string &in mapUid, uint generation) {
             ""
         );
 
+        bool cancelled = false;
         while (task.IsProcessing) {
-            if (generation != g_MapGeneration) return;
+            if (generation != g_MapGeneration) cancelled = true;
             yield();
+        }
+        if (cancelled) {
+            ps.ScoreMgr.TaskResult_Release(task.Id);
+            return;
         }
 
         if (!task.HasFailed && task.HasSucceeded) {
@@ -373,6 +391,15 @@ FriendEntry@ FindFriendForRecord(CMapRecord@ rec) {
         if ((rec.WebServicesUserId.Length > 0 && g_Friends[i].WsId == rec.WebServicesUserId)
             || (rec.AccountId.Length > 0 && g_Friends[i].AccountId == rec.AccountId)
             || (rec.AccountId.Length > 0 && g_Friends[i].WsId == rec.AccountId)) {
+            return g_Friends[i];
+        }
+    }
+    return null;
+}
+
+FriendEntry@ FindFriendByWsId(const string &in wsid) {
+    for (uint i = 0; i < g_Friends.Length; i++) {
+        if (g_Friends[i].WsId == wsid || (g_Friends[i].AccountId.Length > 0 && g_Friends[i].AccountId == wsid)) {
             return g_Friends[i];
         }
     }
@@ -427,12 +454,15 @@ bool LoadGhost(FriendEntry@ f) {
     string mapAtStart = g_MapUid;
 
     auto task = ps.DataFileMgr.Ghost_Download(f.FileName, f.ReplayUrl);
+    bool cancelled = false;
     while (task.IsProcessing) {
-        if (mapAtStart != g_MapUid) {
-            f.GhostBusy = false;
-            return false;
-        }
+        if (mapAtStart != g_MapUid) cancelled = true;
         yield();
+    }
+    if (cancelled) {
+        ps.DataFileMgr.TaskResult_Release(task.Id);
+        f.GhostBusy = false;
+        return false;
     }
 
     if (task.HasFailed || !task.HasSucceeded || task.Ghost is null) {
