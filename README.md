@@ -6,10 +6,12 @@ Openplanet plugin for Trackmania 2020 that turns the user's actual Ubisoft/Track
 
 - Automatically loads the signed-in user's friends through Trackmania's `Friend_GetList` API.
 - Fetches each friend's Personal Best for the current map.
-- Sorts friends by time and shows the gap to the fastest friend.
-- Automatically refreshes while the map stays open.
+- Shows your own PB and your position against friends on the current map.
+- Sorts friends by time and shows a red `BEHIND` or green `AHEAD` delta versus your PB.
+- Automatically refreshes while the map stays open and immediately after a completed run.
 - `Race` loads/removes that friend's record as a ghost.
 - `Watch` loads the ghost if needed and switches to replay/spectate view through MLHook.
+- Can automatically hide your PB ghost while racing a friend and restore it afterwards.
 - Optional automatic loading of the fastest friend ghosts.
 - Refreshes automatically when the current map changes.
 

@@ -6,8 +6,11 @@ bool S_ShowWindow = true;
 [Setting category="General" name="Auto refresh friend times"]
 bool S_AutoRefresh = true;
 
-[Setting category="General" name="Refresh interval (seconds)" min=10 max=300]
-uint S_RefreshSeconds = 30;
+[Setting category="General" name="Refresh interval (seconds)" min=5 max=300]
+uint S_RefreshSeconds = 10;
+
+[Setting category="Ghosts" name="Hide PB ghost while racing a friend"]
+bool S_HidePBGhostWhenRacingFriend = true;
 
 [Setting category="General" name="Auto-load fastest friend ghosts"]
 bool S_AutoLoadGhosts = false;
@@ -61,11 +64,23 @@ bool g_Refreshing = false;
 bool g_FriendsLoaded = false;
 bool g_RefreshRequested = false;
 uint g_LastRefreshMs = 0;
+int64 g_LastRefreshStamp = 0;
+uint g_PlayerPBTime = 0;
+int g_LastUISequence = -1;
+bool g_PBGhostHiddenByPlugin = false;
 string g_Status = "Open a map to load friend times.";
 
 void Main() {
     trace(PluginName + " loaded");
     startnew(WatchMapLoop);
+}
+
+void OnDestroyed() {
+    RestorePBGhostIfNeeded();
+}
+
+void OnDisabled() {
+    RestorePBGhostIfNeeded();
 }
 
 void RenderMenu() {
@@ -84,23 +99,36 @@ void RenderInterface() {
     }
 
     auto map = GetApp().RootMap;
-    if (map !is null) {
-        UI::Text("Map: " + string(map.MapInfo.Name));
+    if (map !is null) UI::Text(string(map.MapInfo.Name));
+
+    if (g_PlayerPBTime > 0) {
+        uint rank = GetPlayerRankAmongFriends();
+        uint fieldSize = CountFriendsWithTimes() + 1;
+        UI::PushStyleColor(UI::Col::Text, vec4(0.35, 0.85, 1.0, 1.0));
+        UI::Text("YOUR PB  " + FormatTime(g_PlayerPBTime) + "   |   #" + rank + " of " + fieldSize);
+        UI::PopStyleColor();
+    } else {
+        UI::Text("YOUR PB  --:--.---");
     }
 
-    UI::SameLine();
     UI::BeginDisabled(g_Refreshing);
-    if (UI::Button(g_Refreshing ? "Refreshing..." : "Refresh now")) {
+    if (UI::Button(g_Refreshing ? "Refreshing..." : "Refresh")) {
         startnew(RefreshAll);
     }
     UI::EndDisabled();
 
-    if (g_LastRefreshMs > 0) {
+    if (g_LastRefreshStamp > 0) {
         UI::SameLine();
-        UI::Text("Updated " + ((Time::Now - g_LastRefreshMs) / 1000) + "s ago");
+        UI::Text("Last updated " + Time::FormatString("%H:%M:%S", g_LastRefreshStamp));
     }
 
-    UI::Text(g_Status);
+    UI::SameLine();
+    if (UI::Checkbox("Hide PB ghost vs friend", S_HidePBGhostWhenRacingFriend)) {
+        if (S_HidePBGhostWhenRacingFriend && AnyFriendGhostLoaded()) HidePBGhostIfNeeded();
+        if (!S_HidePBGhostWhenRacingFriend) RestorePBGhostIfNeeded();
+    }
+
+    if (g_Status.Length > 0) UI::Text(g_Status);
 
     if (!Permissions::PlayRecords()) {
         UI::Text("Ghost/replay actions require Trackmania record/ghost access.");
@@ -109,19 +137,18 @@ void RenderInterface() {
     UI::Separator();
 
     uint withTimes = CountFriendsWithTimes();
-    UI::Text("Friends: " + g_Friends.Length + " | Times on this map: " + withTimes);
+    UI::Text("FRIENDS  " + withTimes + " with a time");
 
     if (UI::BeginTable("##friends-live-table", 6)) {
-        UI::TableNextRow();
-        UI::TableNextColumn(); UI::Text("#");
-        UI::TableNextColumn(); UI::Text("Friend");
-        UI::TableNextColumn(); UI::Text("Time");
-        UI::TableNextColumn(); UI::Text("Delta");
-        UI::TableNextColumn(); UI::Text("Race");
-        UI::TableNextColumn(); UI::Text("Replay");
+        UI::TableSetupColumn("#", UI::TableColumnFlags::WidthFixed, 28.0);
+        UI::TableSetupColumn("Friend", UI::TableColumnFlags::WidthStretch);
+        UI::TableSetupColumn("PB", UI::TableColumnFlags::WidthFixed, 82.0);
+        UI::TableSetupColumn("vs you", UI::TableColumnFlags::WidthFixed, 118.0);
+        UI::TableSetupColumn("Race", UI::TableColumnFlags::WidthFixed, 70.0);
+        UI::TableSetupColumn("Replay", UI::TableColumnFlags::WidthFixed, 70.0);
+        UI::TableHeadersRow();
 
         uint rank = 0;
-        uint bestTime = GetBestFriendTime();
         for (uint i = 0; i < g_Friends.Length; i++) {
             FriendEntry@ f = g_Friends[i];
             if (!f.HasRecord) continue;
@@ -140,7 +167,7 @@ void RenderInterface() {
             UI::Text(FormatTime(f.TimeMs));
 
             UI::TableNextColumn();
-            UI::Text(f.TimeMs == bestTime ? "-" : "+" + FormatDelta(f.TimeMs - bestTime));
+            DrawPBComparison(f.TimeMs);
 
             UI::TableNextColumn();
             UI::BeginDisabled(!Permissions::PlayRecords() || f.GhostBusy || f.ReplayUrl.Length == 0);
@@ -196,21 +223,31 @@ void WatchMapLoop() {
             g_RefreshRequested = false;
             startnew(RefreshAll);
         } else if (uid.Length > 0 && S_AutoRefresh && !g_Refreshing && g_LastRefreshMs > 0) {
-            uint refreshSeconds = S_RefreshSeconds < 10 ? 10 : S_RefreshSeconds;
+            uint refreshSeconds = S_RefreshSeconds < 5 ? 5 : S_RefreshSeconds;
             uint intervalMs = refreshSeconds * 1000;
             if (Time::Now - g_LastRefreshMs >= intervalMs) {
                 startnew(RefreshRecordsOnly);
             }
         }
-        sleep(500);
+
+        if (uid.Length > 0) {
+            uint currentPB = GetPlayerPBTime();
+            if (currentPB > 0) g_PlayerPBTime = currentPB;
+            DetectFinishedRun();
+        }
+        sleep(250);
     }
 }
 
 void ResetMapState() {
+    RestorePBGhostIfNeeded();
     for (uint i = 0; i < g_Friends.Length; i++) {
         g_Friends[i].ResetRecord();
     }
     g_LastRefreshMs = 0;
+    g_LastRefreshStamp = 0;
+    g_PlayerPBTime = 0;
+    g_LastUISequence = -1;
     g_Status = g_MapUid.Length == 0 ? "Open a map to load friend times." : "Loading friends and current-map times...";
 }
 
@@ -229,9 +266,11 @@ void RefreshAll() {
 
     LoadRecordsForCurrentFriends(uid, generation);
     if (generation == g_MapGeneration && uid == g_MapUid) {
+        g_PlayerPBTime = GetPlayerPBTime();
         SortFriends();
         g_LastRefreshMs = Time::Now;
-        g_Status = "Live friend PBs loaded.";
+        g_LastRefreshStamp = Time::Stamp;
+        g_Status = "";
         if (S_AutoLoadGhosts) AutoLoadFastestGhosts(generation);
     }
     g_Refreshing = false;
@@ -264,9 +303,11 @@ void RefreshRecordsOnly() {
 
     LoadRecordsForCurrentFriends(uid, generation);
     if (generation == g_MapGeneration && uid == g_MapUid) {
+        g_PlayerPBTime = GetPlayerPBTime();
         SortFriends();
         g_LastRefreshMs = Time::Now;
-        g_Status = "Live friend PBs refreshed.";
+        g_LastRefreshStamp = Time::Stamp;
+        g_Status = "";
     }
     g_Refreshing = false;
 }
@@ -496,6 +537,7 @@ bool LoadGhost(FriendEntry@ f) {
     f.GhostInstanceId = ps.GhostMgr.Ghost_Add(task.Ghost, true);
     f.GhostLoaded = true;
     f.GhostBusy = false;
+    HidePBGhostIfNeeded();
     trace("Loaded friend ghost: " + f.Name + " (" + FormatTime(f.TimeMs) + ")");
     ps.DataFileMgr.TaskResult_Release(task.Id);
     return true;
@@ -512,6 +554,7 @@ void UnloadGhost(FriendEntry@ f) {
         }
     }
     f.GhostLoaded = false;
+    if (!AnyFriendGhostLoaded()) RestorePBGhostIfNeeded();
 }
 
 void AutoLoadFastestGhosts(uint generation) {
@@ -545,6 +588,81 @@ uint GetBestFriendTime() {
         if (g_Friends[i].HasRecord) return g_Friends[i].TimeMs;
     }
     return 0;
+}
+
+uint GetPlayerPBTime() {
+    CSmArenaRulesMode@ ps = GetRulesMode();
+    auto map = GetApp().RootMap;
+    if (ps is null || ps.ScoreMgr is null || ps.UserMgr is null || ps.UserMgr.Users.Length == 0 || map is null) return 0;
+    return ps.ScoreMgr.Map_GetRecord_v2(ps.UserMgr.Users[0].Id, map.MapInfo.MapUid, "PersonalBest", "", "TimeAttack", "");
+}
+
+uint GetPlayerRankAmongFriends() {
+    if (g_PlayerPBTime == 0) return 0;
+    uint rank = 1;
+    for (uint i = 0; i < g_Friends.Length; i++) {
+        if (g_Friends[i].HasRecord && g_Friends[i].TimeMs < g_PlayerPBTime) rank++;
+    }
+    return rank;
+}
+
+void DrawPBComparison(uint friendTime) {
+    if (g_PlayerPBTime == 0) {
+        UI::Text("--");
+        return;
+    }
+
+    int delta = int(g_PlayerPBTime) - int(friendTime);
+    if (delta > 0) {
+        UI::PushStyleColor(UI::Col::Text, vec4(1.0, 0.35, 0.35, 1.0));
+        UI::Text("BEHIND +" + FormatDelta(uint(delta)));
+        UI::PopStyleColor();
+    } else if (delta < 0) {
+        UI::PushStyleColor(UI::Col::Text, vec4(0.3, 0.95, 0.45, 1.0));
+        UI::Text("AHEAD " + FormatDelta(uint(-delta)));
+        UI::PopStyleColor();
+    } else {
+        UI::Text("EVEN");
+    }
+}
+
+void DetectFinishedRun() {
+    CSmArenaRulesMode@ ps = GetRulesMode();
+    if (ps is null || ps.UIManager is null || ps.UIManager.UIAll is null) return;
+
+    int sequence = int(ps.UIManager.UIAll.UISequence);
+    if (sequence == int(CGamePlaygroundUIConfig::EUISequence::Finish) && g_LastUISequence != sequence) {
+        startnew(RefreshAfterFinishedRun);
+    }
+    g_LastUISequence = sequence;
+}
+
+void RefreshAfterFinishedRun() {
+    // The local PB updates immediately; give the online record a moment to settle.
+    sleep(900);
+    uint pb = GetPlayerPBTime();
+    if (pb > 0) g_PlayerPBTime = pb;
+    if (!g_Refreshing) RefreshRecordsOnly();
+    else g_RefreshRequested = true;
+}
+
+bool AnyFriendGhostLoaded() {
+    for (uint i = 0; i < g_Friends.Length; i++) {
+        if (g_Friends[i].GhostLoaded) return true;
+    }
+    return false;
+}
+
+void HidePBGhostIfNeeded() {
+    if (!S_HidePBGhostWhenRacingFriend || g_PBGhostHiddenByPlugin) return;
+    MLHook::Queue_SH_SendCustomEvent("TMGame_Record_TogglePB", {});
+    g_PBGhostHiddenByPlugin = true;
+}
+
+void RestorePBGhostIfNeeded() {
+    if (!g_PBGhostHiddenByPlugin) return;
+    MLHook::Queue_SH_SendCustomEvent("TMGame_Record_TogglePB", {});
+    g_PBGhostHiddenByPlugin = false;
 }
 
 string FormatTime(uint ms) {
