@@ -320,7 +320,7 @@ bool LoadFriendList(uint generation) {
     userMgr.TaskResult_Release(task.Id);
     if (generation != g_MapGeneration) return false;
 
-    @g_Friends = nextFriends;
+    g_Friends = nextFriends;
     g_FriendsLoaded = true;
     g_Status = "Loaded " + g_Friends.Length + " friends. Loading current-map PBs...";
     return true;
@@ -440,7 +440,27 @@ void WatchReplayCoro(ref@ userdata) {
     }
 
     if (f.WsId.Length == 0) return;
-    MLHook::Queue_PG_SendCustomEvent("TMGame_Record_Spectate", {f.WsId});
+    trace("Watching friend replay: " + f.Name + " (" + FormatTime(f.TimeMs) + ")");
+    MLHook::Queue_SH_SendCustomEvent("TMGame_Record_SpectateGhost", {f.WsId});
+
+    sleep(350);
+    CSmArenaRulesMode@ ps = GetRulesMode();
+    bool spectating = ps !is null && ps.UIManager !is null && ps.UIManager.UIAll.ForceSpectator;
+    if (!spectating) {
+        // Ghosts++ uses the newer playground event on current Trackmania builds.
+        // Keep the Any Ghost event above for compatibility, then fall back here.
+        MLHook::Queue_PG_SendCustomEvent("TMGame_Record_Spectate", {f.WsId});
+        sleep(350);
+        @ps = GetRulesMode();
+        spectating = ps !is null && ps.UIManager !is null && ps.UIManager.UIAll.ForceSpectator;
+    }
+
+    trace("Friend replay spectator state: " + tostring(spectating));
+    if (spectating) {
+        g_Status = "Watching " + f.Name + " replay.";
+    } else {
+        g_Status = "Replay requested for " + f.Name + ".";
+    }
 }
 
 bool LoadGhost(FriendEntry@ f) {
@@ -476,6 +496,7 @@ bool LoadGhost(FriendEntry@ f) {
     f.GhostInstanceId = ps.GhostMgr.Ghost_Add(task.Ghost, true);
     f.GhostLoaded = true;
     f.GhostBusy = false;
+    trace("Loaded friend ghost: " + f.Name + " (" + FormatTime(f.TimeMs) + ")");
     ps.DataFileMgr.TaskResult_Release(task.Id);
     return true;
 }

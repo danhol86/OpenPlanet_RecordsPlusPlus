@@ -19,6 +19,7 @@ Openplanet plugin for Trackmania 2020 that turns the user's actual Ubisoft/Track
 - Openplanet.
 - MLHook.
 - Trackmania ghost/record access is required for Race/Watch actions. The time leaderboard itself is loaded from Trackmania services.
+- For this local unsigned development build, set `Openplanet > Signature Mode > Developer`.
 
 ## Local install
 
@@ -27,4 +28,3 @@ The dev build is copied to:
 `C:\Users\danho\OpenplanetNext\Plugins\FriendsGhostLeaderboard`
 
 Open Openplanet with F3 and reload the plugin after code changes.
-
