@@ -1,11 +1,14 @@
-const string PluginName = "Friends Ghost Leaderboard";
-const string NativeRecordsPageUid = "FriendsNativeRecords";
+const string PluginName = "Records++";
+const string NativeRecordsPageUid = "RecordsPlusPlus_Friends";
 
+// The native Records module stores its zones in ClientUI variables. This small
+// ManiaLink companion adds a FRIENDS zone to that same data model, so Trackmania
+// renders it with its own rows, navigation, ghost eye buttons and PB controls.
 const string NativeRecordsManialink = """
  #Struct K_TMGame_Record_Record { Integer Rank; Text AccountId; Text DisplayName; Integer Score; }
  #Struct K_TMGame_Record_Records { Text ZoneName; Integer WorstScore; Boolean IsFull; Integer Type; K_TMGame_Record_Record[] Records; }
 
-Integer FriendsLeaderboard_Digit(Text _Digit) {
+Integer RecordsPlusPlus_Digit(Text _Digit) {
     if (_Digit == "0") return 0;
     if (_Digit == "1") return 1;
     if (_Digit == "2") return 2;
@@ -22,7 +25,7 @@ Integer FriendsLeaderboard_Digit(Text _Digit) {
 main() {
     declare K_TMGame_Record_Records[] TMGame_Record_ZonesRecords for ClientUI;
     declare Integer TMGame_Record_ZonesRecordsUpdate for ClientUI;
-    declare Text[][] MLHook_Inbound_FriendsNativeRecords for ClientUI = [];
+    declare Text[][] MLHook_Inbound_RecordsPlusPlus_Friends for ClientUI = [];
 
     declare K_TMGame_Record_Record[] FriendsRecords;
     declare Boolean FriendsEnabled = False;
@@ -32,7 +35,7 @@ main() {
     while (True) {
         yield;
 
-        foreach (Event in MLHook_Inbound_FriendsNativeRecords) {
+        foreach (Event in MLHook_Inbound_RecordsPlusPlus_Friends) {
             if (Event.count <= 0) continue;
 
             if (Event[0] == "Reset") {
@@ -43,15 +46,19 @@ main() {
                 declare Integer Rank = 0;
                 declare Integer Score = 0;
                 declare Boolean ReadingScore = False;
+
+                // MLHook messages are text arrays. Rank and score are sent one
+                // digit at a time to avoid depending on TextLib conversion.
                 for (I, 3, Event.count - 1) {
                     if (Event[I] == "|") {
                         ReadingScore = True;
                     } else if (ReadingScore) {
-                        Score = Score * 10 + FriendsLeaderboard_Digit(Event[I]);
+                        Score = Score * 10 + RecordsPlusPlus_Digit(Event[I]);
                     } else {
-                        Rank = Rank * 10 + FriendsLeaderboard_Digit(Event[I]);
+                        Rank = Rank * 10 + RecordsPlusPlus_Digit(Event[I]);
                     }
                 }
+
                 declare K_TMGame_Record_Record Record = K_TMGame_Record_Record {
                     Rank = Rank,
                     AccountId = Event[1],
@@ -67,7 +74,7 @@ main() {
                 Dirty = True;
             }
         }
-        MLHook_Inbound_FriendsNativeRecords = [];
+        MLHook_Inbound_RecordsPlusPlus_Friends = [];
 
         declare Integer FriendsZoneIx = -1;
         foreach (Ix => Zone in TMGame_Record_ZonesRecords) {
@@ -77,8 +84,8 @@ main() {
             }
         }
 
-        // Nadeo periodically rebuilds the shared records array. Re-apply our
-        // zone whenever that happens, as well as whenever friend data changes.
+        // Nadeo periodically rebuilds the native zone array. Re-apply FRIENDS
+        // whenever that happens, and keep it directly after WORLD.
         if (FriendsEnabled && (Dirty || FriendsZoneIx < 0 || LastSharedUpdate != TMGame_Record_ZonesRecordsUpdate)) {
             declare Integer WorstScore = 0;
             foreach (Ix => Record in FriendsRecords) {
@@ -93,8 +100,6 @@ main() {
                 Records = FriendsRecords
             };
 
-            // Keep FRIENDS directly after WORLD (the first native zone), so it
-            // is only one native Records arrow press away from the default view.
             if (FriendsZoneIx == 1 || (FriendsZoneIx == 0 && TMGame_Record_ZonesRecords.count == 1)) {
                 TMGame_Record_ZonesRecords[FriendsZoneIx] = FriendsZone;
             } else {
@@ -128,51 +133,28 @@ main() {
 }
 """;
 
-[Setting hidden]
-bool S_ShowLegacyWindow = false;
-
-[Setting category="General" name="Auto refresh friend times"]
+[Setting category="Friends" name="Auto refresh friend times"]
 bool S_AutoRefresh = true;
 
-[Setting category="General" name="Refresh interval (seconds)" min=5 max=300]
-uint S_RefreshSeconds = 10;
+[Setting category="Friends" name="Refresh interval (seconds)" min=15 max=300]
+uint S_RefreshSeconds = 30;
 
 class FriendEntry {
     string AccountId;
     string WsId;
     string Name;
-    string Presence;
-    string Relationship;
-
     bool HasRecord = false;
     uint TimeMs = 0;
-    uint RecordTimestamp = 0;
-    wstring FileName;
-    string ReplayUrl;
 
-    bool GhostLoaded = false;
-    bool GhostBusy = false;
-    MwId GhostInstanceId;
-    string ErrorText;
-
-    FriendEntry(const string &in accountId, const string &in wsId, const string &in name,
-                const string &in presence, const string &in relationship) {
+    FriendEntry(const string &in accountId, const string &in wsId, const string &in name) {
         AccountId = accountId;
         WsId = wsId;
         Name = name;
-        Presence = presence;
-        Relationship = relationship;
     }
 
     void ResetRecord() {
         HasRecord = false;
         TimeMs = 0;
-        RecordTimestamp = 0;
-        FileName = "";
-        ReplayUrl = "";
-        GhostLoaded = false;
-        GhostBusy = false;
-        ErrorText = "";
     }
 }
 
@@ -198,14 +180,14 @@ bool g_Refreshing = false;
 bool g_FriendsLoaded = false;
 bool g_RefreshRequested = false;
 bool g_NativeRecordsInjected = false;
+bool g_LastCanViewRecords = false;
 uint g_LastRefreshMs = 0;
-int64 g_LastRefreshStamp = 0;
 uint g_PlayerPBTime = 0;
 int g_LastUISequence = -1;
-string g_Status = "Open a map to load friend times.";
 
 void Main() {
     trace(PluginName + " loaded");
+    g_LastCanViewRecords = Permissions::ViewRecords();
     startnew(InitNativeRecordsIntegration);
     startnew(WatchMapLoop);
 }
@@ -220,193 +202,74 @@ void OnDisabled() {
     MLHook::UnregisterMLHooksAndRemoveInjectedML();
 }
 
-void RenderMenu() {
-}
-
-void RenderInterface() {
-    if (!S_ShowLegacyWindow) return;
-    if (GetCurrentMapUid().Length == 0) return;
-
-    if (!UI::Begin("Friends Ghost Leaderboard")) {
-        UI::End();
-        return;
-    }
-
-    auto map = GetApp().RootMap;
-    if (map !is null) UI::Text(string(map.MapInfo.Name));
-
-    if (g_PlayerPBTime > 0) {
-        uint rank = GetPlayerRankAmongFriends();
-        uint fieldSize = CountFriendsWithTimes() + 1;
-        UI::PushStyleColor(UI::Col::Text, vec4(0.35, 0.85, 1.0, 1.0));
-        UI::Text("YOUR PB  " + FormatTime(g_PlayerPBTime) + "   |   #" + rank + " of " + fieldSize);
-        UI::PopStyleColor();
-    } else {
-        UI::Text("YOUR PB  --:--.---");
-    }
-
-    UI::BeginDisabled(g_Refreshing);
-    if (UI::Button(g_Refreshing ? "Refreshing..." : "Refresh")) {
-        startnew(RefreshAll);
-    }
-    UI::EndDisabled();
-
-    if (g_LastRefreshStamp > 0) {
-        UI::SameLine();
-        UI::Text("Last updated " + Time::FormatString("%H:%M:%S", g_LastRefreshStamp));
-    }
-
-    if (g_Status.Length > 0) UI::Text(g_Status);
-
-    if (!Permissions::PlayRecords()) {
-        UI::Text("Ghost/replay actions require Trackmania record/ghost access.");
-    }
-
-    UI::Separator();
-
-    uint withTimes = CountFriendsWithTimes();
-    UI::Text("FRIENDS  " + withTimes + " with a time");
-
-    if (UI::BeginTable("##friends-live-table", 6)) {
-        UI::TableSetupColumn("#", UI::TableColumnFlags::WidthFixed, 28.0);
-        UI::TableSetupColumn("Friend", UI::TableColumnFlags::WidthStretch);
-        UI::TableSetupColumn("PB", UI::TableColumnFlags::WidthFixed, 82.0);
-        UI::TableSetupColumn("vs you", UI::TableColumnFlags::WidthFixed, 118.0);
-        UI::TableSetupColumn("Race", UI::TableColumnFlags::WidthFixed, 70.0);
-        UI::TableSetupColumn("Replay", UI::TableColumnFlags::WidthFixed, 70.0);
-        UI::TableHeadersRow();
-
-        uint rank = 0;
-        for (uint i = 0; i < g_Friends.Length; i++) {
-            FriendEntry@ f = g_Friends[i];
-            if (!f.HasRecord) continue;
-            rank++;
-
-            UI::PushID(f.WsId.Length > 0 ? f.WsId : f.AccountId);
-            UI::TableNextRow();
-
-            UI::TableNextColumn();
-            UI::Text("" + rank);
-
-            UI::TableNextColumn();
-            UI::Text(f.Name);
-
-            UI::TableNextColumn();
-            UI::Text(FormatTime(f.TimeMs));
-
-            UI::TableNextColumn();
-            DrawPBComparison(f.TimeMs);
-
-            UI::TableNextColumn();
-            UI::BeginDisabled(!Permissions::PlayRecords() || f.GhostBusy || f.ReplayUrl.Length == 0);
-            string raceLabel = f.GhostBusy ? "Loading..." : (f.GhostLoaded ? "Remove" : "Race");
-            if (UI::Button(raceLabel)) {
-                if (f.GhostLoaded) {
-                    UnloadGhost(f);
-                } else {
-                    startnew(CoroutineFuncUserdata(ToggleGhostCoro), f);
-                }
-            }
-            UI::EndDisabled();
-
-            UI::TableNextColumn();
-            UI::BeginDisabled(!Permissions::PlayRecords() || f.GhostBusy || f.ReplayUrl.Length == 0);
-            if (UI::Button("Watch")) {
-                startnew(CoroutineFuncUserdata(WatchReplayCoro), f);
-            }
-            UI::EndDisabled();
-
-            UI::PopID();
-        }
-
-        UI::EndTable();
-    }
-
-    if (withTimes == 0 && !g_Refreshing) {
-        UI::Text("None of your loaded friends has a PB on this map yet.");
-    }
-
-    if (g_Friends.Length > withTimes) {
-        UI::Separator();
-        if (UI::TreeNode("Friends without a time (" + (g_Friends.Length - withTimes) + ")")) {
-            for (uint i = 0; i < g_Friends.Length; i++) {
-                if (!g_Friends[i].HasRecord) UI::Text(g_Friends[i].Name);
-            }
-            UI::TreePop();
-        }
-    }
-
-    UI::End();
-}
-
 void WatchMapLoop() {
     while (true) {
+        bool canViewRecords = Permissions::ViewRecords();
+        if (canViewRecords != g_LastCanViewRecords) {
+            g_LastCanViewRecords = canViewRecords;
+            if (canViewRecords && GetCurrentMapUid().Length > 0) {
+                g_RefreshRequested = true;
+            } else {
+                DisableNativeFriendsZone();
+            }
+        }
+
         string uid = GetCurrentMapUid();
         if (uid != g_MapUid) {
             g_MapUid = uid;
             g_MapGeneration++;
             ResetMapState();
-            g_RefreshRequested = uid.Length > 0;
-        } else if (uid.Length > 0 && g_RefreshRequested && !g_Refreshing) {
+            g_RefreshRequested = canViewRecords && uid.Length > 0;
+        } else if (canViewRecords && uid.Length > 0 && g_RefreshRequested && !g_Refreshing) {
             g_RefreshRequested = false;
             startnew(RefreshAll);
-        } else if (uid.Length > 0 && S_AutoRefresh && !g_Refreshing && g_LastRefreshMs > 0) {
-            uint refreshSeconds = S_RefreshSeconds < 5 ? 5 : S_RefreshSeconds;
-            uint intervalMs = refreshSeconds * 1000;
-            if (Time::Now - g_LastRefreshMs >= intervalMs) {
+        } else if (canViewRecords && uid.Length > 0 && S_AutoRefresh && !g_Refreshing && g_LastRefreshMs > 0) {
+            uint refreshSeconds = S_RefreshSeconds < 15 ? 15 : S_RefreshSeconds;
+            if (Time::Now - g_LastRefreshMs >= refreshSeconds * 1000) {
                 startnew(RefreshRecordsOnly);
             }
         }
 
-        if (uid.Length > 0) {
-            uint currentPB = GetPlayerPBTime();
-            if (currentPB > 0) g_PlayerPBTime = currentPB;
-            DetectFinishedRun();
-        }
+        if (canViewRecords && uid.Length > 0) DetectFinishedRun();
         sleep(250);
     }
 }
 
 void ResetMapState() {
-    for (uint i = 0; i < g_Friends.Length; i++) {
-        g_Friends[i].ResetRecord();
-    }
+    for (uint i = 0; i < g_Friends.Length; i++) g_Friends[i].ResetRecord();
     g_LastRefreshMs = 0;
-    g_LastRefreshStamp = 0;
     g_PlayerPBTime = 0;
     g_LastUISequence = -1;
-    g_Status = g_MapUid.Length == 0 ? "Open a map to load friend times." : "Loading friends and current-map times...";
-    if (g_MapUid.Length > 0) SyncNativeFriendsZone();
+
+    if (Permissions::ViewRecords() && g_MapUid.Length > 0) SyncNativeFriendsZone();
+    else DisableNativeFriendsZone();
 }
 
 void RefreshAll() {
-    if (g_Refreshing || g_MapUid.Length == 0) return;
+    if (g_Refreshing || g_MapUid.Length == 0 || !Permissions::ViewRecords()) return;
+
     g_Refreshing = true;
     uint generation = g_MapGeneration;
     string uid = g_MapUid;
-    g_Status = "Loading Ubisoft friends...";
 
     bool friendsOk = LoadFriendList(generation);
-    if (!friendsOk || generation != g_MapGeneration || uid != g_MapUid) {
+    if (!friendsOk || generation != g_MapGeneration || uid != g_MapUid || !Permissions::ViewRecords()) {
         g_Refreshing = false;
         return;
     }
 
     LoadRecordsForCurrentFriends(uid, generation);
-    if (generation == g_MapGeneration && uid == g_MapUid) {
+    if (generation == g_MapGeneration && uid == g_MapUid && Permissions::ViewRecords()) {
         g_PlayerPBTime = GetPlayerPBTime();
-        SortFriends();
         g_LastRefreshMs = Time::Now;
-        g_LastRefreshStamp = Time::Stamp;
-        g_Status = "";
         SyncNativeFriendsZone();
     }
     g_Refreshing = false;
 }
 
 void RefreshRecordsOnly() {
-    if (g_Refreshing || g_MapUid.Length == 0) return;
-    if (!g_FriendsLoaded || g_Friends.Length == 0) {
+    if (g_Refreshing || g_MapUid.Length == 0 || !Permissions::ViewRecords()) return;
+    if (!g_FriendsLoaded) {
         RefreshAll();
         return;
     }
@@ -414,28 +277,13 @@ void RefreshRecordsOnly() {
     g_Refreshing = true;
     uint generation = g_MapGeneration;
     string uid = g_MapUid;
-    g_Status = "Refreshing friend PBs...";
 
-    for (uint i = 0; i < g_Friends.Length; i++) {
-        bool wasLoaded = g_Friends[i].GhostLoaded;
-        MwId oldInstance = g_Friends[i].GhostInstanceId;
-        g_Friends[i].HasRecord = false;
-        g_Friends[i].TimeMs = 0;
-        g_Friends[i].RecordTimestamp = 0;
-        g_Friends[i].FileName = "";
-        g_Friends[i].ReplayUrl = "";
-        g_Friends[i].ErrorText = "";
-        g_Friends[i].GhostLoaded = wasLoaded;
-        g_Friends[i].GhostInstanceId = oldInstance;
-    }
+    for (uint i = 0; i < g_Friends.Length; i++) g_Friends[i].ResetRecord();
 
     LoadRecordsForCurrentFriends(uid, generation);
-    if (generation == g_MapGeneration && uid == g_MapUid) {
+    if (generation == g_MapGeneration && uid == g_MapUid && Permissions::ViewRecords()) {
         g_PlayerPBTime = GetPlayerPBTime();
-        SortFriends();
         g_LastRefreshMs = Time::Now;
-        g_LastRefreshStamp = Time::Stamp;
-        g_Status = "";
         SyncNativeFriendsZone();
     }
     g_Refreshing = false;
@@ -443,25 +291,23 @@ void RefreshRecordsOnly() {
 
 bool LoadFriendList(uint generation) {
     CSmArenaRulesMode@ ps = GetRulesMode();
-    if (ps is null || ps.UserMgr is null || ps.UserMgr.Users.Length == 0) {
-        g_Status = "Trackmania user services are not available in this mode.";
-        return false;
-    }
+    if (ps is null || ps.UserMgr is null || ps.UserMgr.Users.Length == 0) return false;
 
     auto userMgr = ps.UserMgr;
     auto task = userMgr.Friend_GetList(userMgr.Users[0].Id);
     bool cancelled = false;
     while (task.IsProcessing) {
-        if (generation != g_MapGeneration) cancelled = true;
+        if (generation != g_MapGeneration || !Permissions::ViewRecords()) cancelled = true;
         yield();
     }
+
     if (cancelled) {
         userMgr.TaskResult_Release(task.Id);
         return false;
     }
 
     if (task.HasFailed || !task.HasSucceeded) {
-        g_Status = "Could not load Ubisoft friends: " + task.ErrorDescription;
+        warn("Friend_GetList failed: " + task.ErrorDescription);
         userMgr.TaskResult_Release(task.Id);
         return false;
     }
@@ -477,14 +323,7 @@ bool LoadFriendList(uint generation) {
 
         string name = string(fr.DisplayName);
         if (name.Length == 0) name = wsid;
-        FriendEntry@ next = FriendEntry(fr.AccountId, wsid, name, fr.Presence, fr.Relationship);
-        FriendEntry@ previous = FindFriendByWsId(wsid);
-        if (previous !is null) {
-            next.GhostLoaded = previous.GhostLoaded;
-            next.GhostBusy = previous.GhostBusy;
-            next.GhostInstanceId = previous.GhostInstanceId;
-        }
-        nextFriends.InsertLast(next);
+        nextFriends.InsertLast(FriendEntry(fr.AccountId, wsid, name));
     }
 
     userMgr.TaskResult_Release(task.Id);
@@ -492,28 +331,24 @@ bool LoadFriendList(uint generation) {
 
     g_Friends = nextFriends;
     g_FriendsLoaded = true;
-    g_Status = "Loaded " + g_Friends.Length + " friends. Loading current-map PBs...";
     return true;
 }
 
 void LoadRecordsForCurrentFriends(const string &in mapUid, uint generation) {
-    if (g_Friends.Length == 0) return;
+    if (g_Friends.Length == 0 || !Permissions::ViewRecords()) return;
 
     CSmArenaRulesMode@ ps = GetRulesMode();
-    if (ps is null || ps.ScoreMgr is null || ps.UserMgr is null || ps.UserMgr.Users.Length == 0) {
-        g_Status = "Score services are not available in this mode.";
-        return;
-    }
+    if (ps is null || ps.ScoreMgr is null || ps.UserMgr is null || ps.UserMgr.Users.Length == 0) return;
 
+    // The API accepts explicit account IDs. Query friends in bounded batches;
+    // this is deliberately not a full-leaderboard request.
     const uint BatchSize = 50;
     for (uint start = 0; start < g_Friends.Length; start += BatchSize) {
-        if (generation != g_MapGeneration || mapUid != g_MapUid) return;
+        if (generation != g_MapGeneration || mapUid != g_MapUid || !Permissions::ViewRecords()) return;
 
         MwFastBuffer<wstring> ids;
         uint end = Math::Min(start + BatchSize, g_Friends.Length);
-        for (uint i = start; i < end; i++) {
-            ids.Add(g_Friends[i].WsId);
-        }
+        for (uint i = start; i < end; i++) ids.Add(g_Friends[i].WsId);
 
         auto task = ps.ScoreMgr.Map_GetPlayerListRecordList(
             ps.UserMgr.Users[0].Id,
@@ -527,9 +362,10 @@ void LoadRecordsForCurrentFriends(const string &in mapUid, uint generation) {
 
         bool cancelled = false;
         while (task.IsProcessing) {
-            if (generation != g_MapGeneration) cancelled = true;
+            if (generation != g_MapGeneration || !Permissions::ViewRecords()) cancelled = true;
             yield();
         }
+
         if (cancelled) {
             ps.ScoreMgr.TaskResult_Release(task.Id);
             return;
@@ -539,13 +375,9 @@ void LoadRecordsForCurrentFriends(const string &in mapUid, uint generation) {
             for (uint r = 0; r < task.MapRecordList.Length; r++) {
                 auto rec = task.MapRecordList[r];
                 FriendEntry@ f = FindFriendForRecord(rec);
-                if (f is null) continue;
-
+                if (f is null || rec.Time == 0) continue;
                 f.HasRecord = true;
                 f.TimeMs = rec.Time;
-                f.RecordTimestamp = rec.Timestamp;
-                f.FileName = rec.FileName;
-                f.ReplayUrl = rec.ReplayUrl;
             }
         } else {
             warn("Map_GetPlayerListRecordList failed: " + task.ErrorDescription);
@@ -567,123 +399,6 @@ FriendEntry@ FindFriendForRecord(CMapRecord@ rec) {
     return null;
 }
 
-FriendEntry@ FindFriendByWsId(const string &in wsid) {
-    for (uint i = 0; i < g_Friends.Length; i++) {
-        if (g_Friends[i].WsId == wsid || (g_Friends[i].AccountId.Length > 0 && g_Friends[i].AccountId == wsid)) {
-            return g_Friends[i];
-        }
-    }
-    return null;
-}
-
-void SortFriends() {
-    for (uint i = 0; i < g_Friends.Length; i++) {
-        for (uint j = i + 1; j < g_Friends.Length; j++) {
-            if (FriendComesBefore(g_Friends[j], g_Friends[i])) {
-                FriendEntry@ temp = g_Friends[i];
-                @g_Friends[i] = g_Friends[j];
-                @g_Friends[j] = temp;
-            }
-        }
-    }
-}
-
-bool FriendComesBefore(FriendEntry@ a, FriendEntry@ b) {
-    if (a.HasRecord != b.HasRecord) return a.HasRecord;
-    if (a.HasRecord && b.HasRecord && a.TimeMs != b.TimeMs) return a.TimeMs < b.TimeMs;
-    return a.Name.ToLower() < b.Name.ToLower();
-}
-
-void ToggleGhostCoro(ref@ userdata) {
-    FriendEntry@ f = cast<FriendEntry>(userdata);
-    if (f is null || f.GhostLoaded) return;
-    LoadGhost(f);
-}
-
-void WatchReplayCoro(ref@ userdata) {
-    FriendEntry@ f = cast<FriendEntry>(userdata);
-    if (f is null) return;
-
-    if (!f.GhostLoaded) {
-        if (!LoadGhost(f)) return;
-        sleep(100);
-    }
-
-    if (f.WsId.Length == 0) return;
-    trace("Watching friend replay: " + f.Name + " (" + FormatTime(f.TimeMs) + ")");
-    MLHook::Queue_SH_SendCustomEvent("TMGame_Record_SpectateGhost", {f.WsId});
-
-    sleep(350);
-    CSmArenaRulesMode@ ps = GetRulesMode();
-    bool spectating = ps !is null && ps.UIManager !is null && ps.UIManager.UIAll.ForceSpectator;
-    if (!spectating) {
-        // Ghosts++ uses the newer playground event on current Trackmania builds.
-        // Keep the Any Ghost event above for compatibility, then fall back here.
-        MLHook::Queue_PG_SendCustomEvent("TMGame_Record_Spectate", {f.WsId});
-        sleep(350);
-        @ps = GetRulesMode();
-        spectating = ps !is null && ps.UIManager !is null && ps.UIManager.UIAll.ForceSpectator;
-    }
-
-    trace("Friend replay spectator state: " + tostring(spectating));
-    if (spectating) {
-        g_Status = "Watching " + f.Name + " replay.";
-    } else {
-        g_Status = "Replay requested for " + f.Name + ".";
-    }
-}
-
-bool LoadGhost(FriendEntry@ f) {
-    if (f is null || f.GhostBusy || f.ReplayUrl.Length == 0 || !Permissions::PlayRecords()) return false;
-
-    CSmArenaRulesMode@ ps = GetRulesMode();
-    if (ps is null || ps.DataFileMgr is null || ps.GhostMgr is null) return false;
-
-    f.GhostBusy = true;
-    f.ErrorText = "";
-    string mapAtStart = g_MapUid;
-
-    auto task = ps.DataFileMgr.Ghost_Download(f.FileName, f.ReplayUrl);
-    bool cancelled = false;
-    while (task.IsProcessing) {
-        if (mapAtStart != g_MapUid) cancelled = true;
-        yield();
-    }
-    if (cancelled) {
-        ps.DataFileMgr.TaskResult_Release(task.Id);
-        f.GhostBusy = false;
-        return false;
-    }
-
-    if (task.HasFailed || !task.HasSucceeded || task.Ghost is null) {
-        f.ErrorText = "Could not download ghost";
-        warn("Ghost_Download failed for " + f.Name + ": " + task.ErrorDescription);
-        ps.DataFileMgr.TaskResult_Release(task.Id);
-        f.GhostBusy = false;
-        return false;
-    }
-
-    f.GhostInstanceId = ps.GhostMgr.Ghost_Add(task.Ghost, true);
-    f.GhostLoaded = true;
-    f.GhostBusy = false;
-    trace("Loaded friend ghost: " + f.Name + " (" + FormatTime(f.TimeMs) + ")");
-    ps.DataFileMgr.TaskResult_Release(task.Id);
-    return true;
-}
-
-void UnloadGhost(FriendEntry@ f) {
-    if (f is null || !f.GhostLoaded) return;
-    CSmArenaRulesMode@ ps = GetRulesMode();
-    if (ps !is null && ps.GhostMgr !is null) {
-        try {
-            ps.GhostMgr.Ghost_Remove(f.GhostInstanceId);
-        } catch {
-            warn("Could not remove ghost for " + f.Name);
-        }
-    }
-    f.GhostLoaded = false;
-}
-
 CSmArenaRulesMode@ GetRulesMode() {
     return cast<CSmArenaRulesMode>(GetApp().PlaygroundScript);
 }
@@ -694,53 +409,12 @@ string GetCurrentMapUid() {
     return map.MapInfo.MapUid;
 }
 
-uint CountFriendsWithTimes() {
-    uint count = 0;
-    for (uint i = 0; i < g_Friends.Length; i++) if (g_Friends[i].HasRecord) count++;
-    return count;
-}
-
-uint GetBestFriendTime() {
-    for (uint i = 0; i < g_Friends.Length; i++) {
-        if (g_Friends[i].HasRecord) return g_Friends[i].TimeMs;
-    }
-    return 0;
-}
-
 uint GetPlayerPBTime() {
+    if (!Permissions::ViewRecords()) return 0;
     CSmArenaRulesMode@ ps = GetRulesMode();
     auto map = GetApp().RootMap;
     if (ps is null || ps.ScoreMgr is null || ps.UserMgr is null || ps.UserMgr.Users.Length == 0 || map is null) return 0;
     return ps.ScoreMgr.Map_GetRecord_v2(ps.UserMgr.Users[0].Id, map.MapInfo.MapUid, "PersonalBest", "", "TimeAttack", "");
-}
-
-uint GetPlayerRankAmongFriends() {
-    if (g_PlayerPBTime == 0) return 0;
-    uint rank = 1;
-    for (uint i = 0; i < g_Friends.Length; i++) {
-        if (g_Friends[i].HasRecord && g_Friends[i].TimeMs < g_PlayerPBTime) rank++;
-    }
-    return rank;
-}
-
-void DrawPBComparison(uint friendTime) {
-    if (g_PlayerPBTime == 0) {
-        UI::Text("--");
-        return;
-    }
-
-    int delta = int(g_PlayerPBTime) - int(friendTime);
-    if (delta > 0) {
-        UI::PushStyleColor(UI::Col::Text, vec4(1.0, 0.35, 0.35, 1.0));
-        UI::Text("BEHIND +" + FormatDelta(uint(delta)));
-        UI::PopStyleColor();
-    } else if (delta < 0) {
-        UI::PushStyleColor(UI::Col::Text, vec4(0.3, 0.95, 0.45, 1.0));
-        UI::Text("AHEAD " + FormatDelta(uint(-delta)));
-        UI::PopStyleColor();
-    } else {
-        UI::Text("EVEN");
-    }
 }
 
 void DetectFinishedRun() {
@@ -755,10 +429,9 @@ void DetectFinishedRun() {
 }
 
 void RefreshAfterFinishedRun() {
-    // The local PB updates immediately; give the online record a moment to settle.
+    // Give the online PB a short moment to settle after the finish event.
     sleep(900);
-    uint pb = GetPlayerPBTime();
-    if (pb > 0) g_PlayerPBTime = pb;
+    if (!Permissions::ViewRecords()) return;
     if (!g_Refreshing) RefreshRecordsOnly();
     else g_RefreshRequested = true;
 }
@@ -767,9 +440,9 @@ void InitNativeRecordsIntegration() {
     MLHook::InjectManialinkToPlayground(NativeRecordsPageUid, NativeRecordsManialink, true);
     g_NativeRecordsInjected = true;
 
-    // Give MLHook a moment to create the page when the plugin is hot-loaded in a map.
+    // Allow MLHook to create the page when the plugin is hot-loaded mid-map.
     sleep(500);
-    if (GetCurrentMapUid().Length > 0) SyncNativeFriendsZone();
+    if (Permissions::ViewRecords() && GetCurrentMapUid().Length > 0) SyncNativeFriendsZone();
 }
 
 void DisableNativeFriendsZone() {
@@ -781,6 +454,11 @@ void DisableNativeFriendsZone() {
 
 void SyncNativeFriendsZone() {
     if (!g_NativeRecordsInjected || GetCurrentMapUid().Length == 0) return;
+    if (!Permissions::ViewRecords()) {
+        DisableNativeFriendsZone();
+        return;
+    }
+
     auto app = GetApp();
     if (app.Network is null || app.Network.ClientManiaAppPlayground is null) return;
 
@@ -840,6 +518,8 @@ array<NativeRecordRow@> BuildNativeRecordRows() {
         else allRows[i].Rank = allRows[i - 1].Rank;
     }
 
+    // The native Records panel shows a compact list. Match its normal layout:
+    // top 5, then a small window around the local player when needed.
     if (allRows.Length <= 8) return allRows;
 
     array<NativeRecordRow@> shown;
@@ -863,22 +543,4 @@ array<NativeRecordRow@> BuildNativeRecordRows() {
     if (start + 3 > int(allRows.Length)) start = int(allRows.Length) - 3;
     for (int i = start; i < start + 3; i++) shown.InsertLast(allRows[i]);
     return shown;
-}
-
-string FormatTime(uint ms) {
-    uint minutes = ms / 60000;
-    uint seconds = (ms % 60000) / 1000;
-    uint millis = ms % 1000;
-    return tostring(minutes) + ":" + Text::Format("%02d", seconds) + "." + Text::Format("%03d", millis);
-}
-
-string FormatDelta(uint ms) {
-    uint seconds = ms / 1000;
-    uint millis = ms % 1000;
-    if (seconds >= 60) {
-        uint minutes = seconds / 60;
-        seconds %= 60;
-        return tostring(minutes) + ":" + Text::Format("%02d", seconds) + "." + Text::Format("%03d", millis);
-    }
-    return tostring(seconds) + "." + Text::Format("%03d", millis);
 }

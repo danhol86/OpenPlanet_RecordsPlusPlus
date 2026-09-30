@@ -1,32 +1,52 @@
-# Friends Ghost Leaderboard
+# Records++
 
-Openplanet plugin for Trackmania 2020 that adds the user's actual Ubisoft/Trackmania friends directly into Trackmania's native Records leaderboard.
+Records++ adds a **FRIENDS** ranking directly to Trackmania's native Records panel.
+
+It uses your Ubisoft/Trackmania friend list, fetches each friend's Personal Best for the current map, and inserts those records into the same native UI used by WORLD and regional rankings. Trackmania's own ghost eye controls and **HIDE PB GHOST** option continue to work normally.
 
 ## Features
 
-- Automatically loads the signed-in user's friends through Trackmania's `Friend_GetList` API.
-- Fetches each friend's Personal Best for the current map.
-- Adds a native `FRIENDS` Records zone using Trackmania's own leaderboard UI.
-- Includes your own PB in the FRIENDS ranking for direct comparison.
-- Keeps FRIENDS directly after WORLD for quick native arrow navigation.
-- Automatically refreshes while the map stays open and immediately after a completed run.
-- Uses Trackmania's native eye button to load/remove a friend's ghost.
-- Uses Trackmania's own `HIDE PB GHOST` control while racing a friend.
-- Uses the game's normal record/replay interactions instead of a separate plugin leaderboard window.
-- Refreshes automatically when the current map changes.
+- Native **FRIENDS** Records category, directly after WORLD.
+- Automatically loads the signed-in user's Trackmania friends.
+- Shows friend PBs plus the local player's PB in one ranking.
+- Uses Trackmania's native row styling, navigation and ghost controls.
+- Refreshes friend PBs periodically and again after a completed run.
+- Queries only explicit friend account IDs; it does not download full leaderboards.
+- Respects `Permissions::ViewRecords()` so it does not expose records where Trackmania disallows them.
+- Relies on Trackmania's native permissions/UI for playing record ghosts.
 
 ## Requirements
 
 - Trackmania 2020 on PC.
 - Openplanet.
 - MLHook.
-- Trackmania ghost/record access is required for native ghost/replay actions. The time leaderboard itself is loaded from Trackmania services.
-- For this local unsigned development build, set `Openplanet > Signature Mode > Developer`.
 
-## Local install
+## Build
 
-The dev build is copied to:
+```powershell
+./build.ps1
+```
 
-`C:\Users\danho\OpenplanetNext\Plugins\FriendsGhostLeaderboard`
+The package is written to `build/RecordsPlusPlus-<version>.op`.
 
-Open Openplanet with F3 and reload the plugin after code changes.
+For local development installation:
+
+```powershell
+./build.ps1 -Install
+```
+
+Unsigned development builds require Openplanet's **Developer** signature mode. Approved website builds are signed by Openplanet and can run in **Regular** mode.
+
+## Releases
+
+Push a tag matching the plugin version, for example `v0.3.0`. The GitHub Actions release workflow builds the `.op` package and attaches it to a GitHub Release.
+
+Openplanet website publication is a separate review/signing step; see [PUBLISHING.md](PUBLISHING.md).
+
+## Development disclosure
+
+This project has used AI-assisted development. Any Openplanet website submission must accurately disclose that assistance and comply with Openplanet's current AI-classification and plugin-review rules.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
