@@ -11,6 +11,7 @@ array<BuddyTime@> buddies;
 string seenMap = "";
 bool gettingTimes = false;
 bool loadedOnce = false;
+uint64 lastChecked = 0;
 
 const string script = """
  #Include "TextLib" as T
@@ -117,7 +118,7 @@ void Main() {
             if (map.Length == 0) MLHook::Queue_MessageManialinkPlayground(page, {"off"});
             else MLHook::Queue_MessageManialinkPlayground(page, {"reset"});
         }
-        if (map.Length > 0 && !gettingTimes && !loadedOnce) {
+        if (map.Length > 0 && !gettingTimes && (!loadedOnce || Time::Now - lastChecked > 30000)) {
             gettingTimes = true;
             startnew(fetchBuddies);
         }
@@ -143,12 +144,21 @@ void fetchBuddies() {
         return;
     }
     array<BuddyTime@> list;
+    BuddyTime@ me = BuddyTime();
+    auto localGuy = GetApp().LocalPlayerInfo;
+    if (localGuy !is null) {
+        me.id = localGuy.WebServicesUserId;
+        me.name = string(localGuy.Name);
+        if (me.name.Length == 0) me.name = me.id;
+        if (me.id.Length > 0) list.InsertLast(me);
+    }
     for (uint i = 0; i < friendsJob.FriendList.Length; i++) {
         auto friend = friendsJob.FriendList[i];
         if (friend is null) continue;
         string id = friend.WebServicesUserId;
         if (id.Length == 0) id = friend.AccountId;
         if (id.Length == 0) continue;
+        if (id == me.id) continue;
         BuddyTime@ entry = BuddyTime();
         entry.id = id;
         entry.name = string(friend.DisplayName);
@@ -209,6 +219,7 @@ void fetchBuddies() {
     }
     gettingTimes = false;
     loadedOnce = true;
+    lastChecked = Time::Now;
     trace("friends shown " + buddies.Length);
 }
 
