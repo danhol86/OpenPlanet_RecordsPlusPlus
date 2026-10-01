@@ -30,7 +30,7 @@ Move-Item -LiteralPath $Zip -Destination $Output
 Write-Host "Built package: $Output"
 
 if ($Install) {
-    $OpenplanetPlugins = 'C:\Users\danho\OpenplanetNext\Plugins'
+    $OpenplanetPlugins = Join-Path $env:USERPROFILE 'OpenplanetNext\Plugins'
     $PluginDir = Join-Path $OpenplanetPlugins $PluginId
     $LegacyPluginDir = Join-Path $OpenplanetPlugins 'FriendsGhostLeaderboard'
 
