@@ -22,8 +22,6 @@ New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $ProjectRoot 'src\Main.as') -Destination (Join-Path $StageDir 'Main.as')
 Copy-Item -LiteralPath $InfoPath -Destination (Join-Path $StageDir 'info.toml')
-Copy-Item -LiteralPath (Join-Path $ProjectRoot 'README.md') -Destination (Join-Path $StageDir 'README.md')
-Copy-Item -LiteralPath (Join-Path $ProjectRoot 'LICENSE') -Destination (Join-Path $StageDir 'LICENSE')
 
 $Zip = [System.IO.Path]::ChangeExtension($Output, '.zip')
 Compress-Archive -Path (Join-Path $StageDir '*') -DestinationPath $Zip -CompressionLevel Optimal
