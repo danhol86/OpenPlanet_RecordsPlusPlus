@@ -1,6 +1,6 @@
 # Records++
 
-Main idea is to add a FRIENDS tab into the normal Trackmania records UI and show me and friends times and world positions (maybe add option to toggle this off and show rank vs friends)
+Adds a new FRIENDS tab into the normal Trackmania records UI and shows yourself and friends times and world positions (thinking to add option to toggle this off and show rank vs friends)
 
 ## What I used
 
