@@ -27,8 +27,11 @@ public class FriendsRecords : CSmMlScriptIngame, IContext
 {
     private void Dbg(string msg)
     {
+        #if !PRODUCTION
         //needs to match hook in the as file
+
         SendCustomEvent("RecordsPlusPlus_Debug", [msg]);
+    #endif
     }
 
     public void Main()

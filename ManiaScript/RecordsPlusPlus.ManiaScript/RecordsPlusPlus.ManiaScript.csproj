@@ -10,6 +10,10 @@
 		<ManiaScriptVersion>2</ManiaScriptVersion>
 	</PropertyGroup>
 
+	<PropertyGroup Condition="'$(ProductionBuild)' == 'true'">
+		<DefineConstants>$(DefineConstants);PRODUCTION</DefineConstants>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<PackageReference Include="ManiaScriptSharp" Version="1.0.0-beta.3" />
 		<PackageReference Include="ManiaScriptSharp.Generator" Version="1.0.0-beta.3" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />

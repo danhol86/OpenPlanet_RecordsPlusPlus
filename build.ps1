@@ -9,8 +9,14 @@ $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $ManiaScriptProject = Join-Path $ProjectRoot 'ManiaScript\RecordsPlusPlus.ManiaScript\RecordsPlusPlus.ManiaScript.csproj'
 
-Write-Host "Building ManiaScript..."
-dotnet build $ManiaScriptProject
+if ($Production) {
+    Write-Host "if production then add property to is used in c# code to ignore debugging..."
+    dotnet build $ManiaScriptProject -p:ProductionBuild=true
+}
+else {
+    Write-Host "if debugging then dont add property to is used in c# code to ignore debugging..."
+    dotnet build $ManiaScriptProject
+}
 
 if ($LASTEXITCODE -ne 0) {
     throw 'ManiaScript build failed.'
