@@ -1,0 +1,71 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Check tag matches info.toml
+        id: version
+        shell: pwsh
+        run: |
+          $info = Get-Content .\info.toml -Raw
+
+          if ($info -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
+              throw "Could not find version in info.toml"
+          }
+
+          $version = $matches[1]
+          $expectedTag = "v$version"
+
+          if ("${{ github.ref_name }}" -ne $expectedTag) {
+              throw "Tag ${{ github.ref_name }} does not match info.toml version $version. Expected $expectedTag"
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build plugin
+        shell: pwsh
+        run: .\build.ps1
+
+      - name: Prepare release files
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+
+          Copy-Item `
+            ".\build\RecordsPlusPlus\Main.as" `
+            ".\build\RecordsPlusPlus-$version.as"
+
+          if (-not (Test-Path ".\build\RecordsPlusPlus-$version.op")) {
+              throw "Built .op file was not found"
+          }
+
+          if (-not (Test-Path ".\build\RecordsPlusPlus-$version.as")) {
+              throw "Built .as file was not found"
+          }
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Records++ v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            build/RecordsPlusPlus-${{ steps.version.outputs.version }}.op
+            build/RecordsPlusPlus-${{ steps.version.outputs.version }}.as
