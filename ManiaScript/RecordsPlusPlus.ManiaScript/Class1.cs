@@ -3,6 +3,9 @@ using static ManiaScriptSharp.ManiaScript;
 
 namespace RecordsPlusPlus.ManiaScript;
 
+//this neeeds to matches the records from here:
+//https://github.com/BigBang1112/maniascript-sharp/blob/main/src/ManiaScriptSharp.Trackmania/Scripts/Libs/Nadeo/TMGame/Modes/Base/UIModules/Record_Common.Script.txt
+
 public struct K_TMGame_Record_Record
 {
     public int Rank;
@@ -24,6 +27,7 @@ public class FriendsRecords : CSmMlScriptIngame, IContext
 {
     private void Dbg(string msg)
     {
+        //needs to match hook in the as file
         SendCustomEvent("RecordsPlusPlus_Debug", [msg]);
     }
 
@@ -31,6 +35,7 @@ public class FriendsRecords : CSmMlScriptIngame, IContext
     {
         Dbg("SCRIPT STARTED");
 
+        //populates zonesRecords with all zones
         Local<List<K_TMGame_Record_Records>>.For(ClientUI, out var zonesRecords, name: "TMGame_Record_ZonesRecords");
 
         Dbg("Loaded zones records: " + zonesRecords.Value.Count.ToString());
@@ -46,12 +51,14 @@ public class FriendsRecords : CSmMlScriptIngame, IContext
         var changed = false;
         var lastUpdate = -1;
 
+        //need to keep looping so we can monitor events from the as file
         while (true)
         {
             Yield();
 
             var x = 0;
 
+            //if theres messages in value then even raised from as file
             while (x < inbound.Value.Count)
             {
                 var msg = inbound.Value[x];
@@ -89,11 +96,13 @@ public class FriendsRecords : CSmMlScriptIngame, IContext
                 x += 1;
             }
 
+            //clear inbound messages 
             inbound.Value = [];
 
             var found = -1;
             x = 0;
 
+            //look for existing FRIENDS zone
             while (x < zonesRecords.Value!.Count)
             {
                 if (zonesRecords.Value![x].ZoneName == "FRIENDS")
@@ -102,17 +111,16 @@ public class FriendsRecords : CSmMlScriptIngame, IContext
                 x += 1;
             }
 
-            if (enabled && zonesRecords.Value!.Count > 0 &&(changed || found < 0 || lastUpdate != zonesRecordsUpdate.Value))
+            //if new message has come in and need to create/update friends tab and not already udpated
+            if (enabled && zonesRecords.Value!.Count > 0 && (changed || found < 0 || lastUpdate != zonesRecordsUpdate.Value))
             {
                 var worst = 0;
                 x = 0;
 
-                while (x < people.Count)
+                foreach(var person in people)
                 {
-                    if (people[x].Score > worst)
-                        worst = people[x].Score;
-
-                    x += 1;
+                    if (person.Score > worst)
+                        worst = person.Score;
                 }
 
                 var friends = new K_TMGame_Record_Records
@@ -149,6 +157,7 @@ public class FriendsRecords : CSmMlScriptIngame, IContext
                 changed = false;
             }
 
+            //remove friends zone if no longer enabled
             if (!enabled && found >= 0)
             {
                 zonesRecords.Value!.RemoveAt(found);

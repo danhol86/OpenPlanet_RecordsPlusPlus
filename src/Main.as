@@ -41,6 +41,7 @@ void Dbg(const string &in source, const string &in message) {
     debugLines.InsertLast(line);
 }
 
+//create hook to allow for messages to be passerd from ml events so can log exceptions etc
 class ScriptDebugHook : MLHook::HookMLEventsByType {
     ScriptDebugHook() {
         super("RecordsPlusPlus_Debug");
@@ -60,6 +61,7 @@ class ScriptDebugHook : MLHook::HookMLEventsByType {
     }
 }
 
+//shows popup if debugging enabled and show is true
 void Render() {
 
     if(!ShowPopup) {
@@ -68,14 +70,7 @@ void Render() {
 
     UI::SetNextWindowSize(900, 550, UI::Cond::FirstUseEver);
 
-    UI::Begin("Records++ Debug");
-
-    UI::Text("Map: " + seenMap);
-    UI::Text(
-        "gettingTimes=" + tostring(gettingTimes)
-        + " loadedOnce=" + tostring(loadedOnce)
-        + " friends=" + tostring(friends.Length)
-    );
+    UI::Begin("Records++ Debugging");
 
     UI::Separator();
 
@@ -97,6 +92,7 @@ void Main() {
 
     Dbg("AS", "PLUGIN START");
 
+    //register debugger on ML
     @scriptDebugHook = ScriptDebugHook();
     MLHook::RegisterMLHook(
             scriptDebugHook,
@@ -104,14 +100,19 @@ void Main() {
             true
         );
 
-    NadeoServices::AddAudience("NadeoLiveServices");
-
+    
+    //script is being injected here from the cs project Generated folder
     MLHook::InjectManialinkToPlayground(page, script, true);
+
     while (true) {
         auto app = GetApp();
         string map = "";
+
+        //get current map
         if (app.RootMap !is null && app.RootMap.MapInfo !is null && Permissions::ViewRecords())
             map = app.RootMap.MapInfo.MapUid;
+
+        //check if already loaded this map so dont create again. if different then reset view or remove it if out of any map
         if (map != seenMap) {
             seenMap = map;
             loadedOnce = false;
@@ -131,29 +132,47 @@ void Main() {
 }
 
 void fetchfriends() {
-    string wanted = seenMap;
-    trace("friends map " + wanted);
+
+    //log the map. so if changes during fetch it stops and doesnt get confused
+    string requestedMap = seenMap;
+
     auto game = cast<CSmArenaRulesMode>(GetApp().PlaygroundScript);
     if (game is null || game.UserMgr is null || game.ScoreMgr is null || game.UserMgr.Users.Length == 0) {
         gettingTimes = false;
         return;
     }
-    auto user = game.UserMgr.Users[0].Id;
+
+    auto currentUser = game.UserMgr.Users[0];
+    auto user = currentUser.Id;
+
     auto friendsJob = game.UserMgr.Friend_GetList(user);
     while (friendsJob.IsProcessing) yield();
-    trace("friends request finished " + friendsJob.HasSucceeded + " count " + friendsJob.FriendList.Length);
-    if (friendsJob.HasFailed || !friendsJob.HasSucceeded || wanted != seenMap) {
+    if (friendsJob.HasFailed || !friendsJob.HasSucceeded || requestedMap != seenMap) {
         game.UserMgr.TaskResult_Release(friendsJob.Id);
         gettingTimes = false;
         return;
     }
     array<FriendsTime@> list;
+
+    auto myInfo = GetApp().LocalPlayerInfo;
+
+    if (myInfo !is null) {
+        Dbg("AS", "Loaded main user info: " + myInfo.WebServicesUserId);
+
+        FriendsTime@ currentEntry = FriendsTime();
+
+        currentEntry.id = myInfo.WebServicesUserId;
+        currentEntry.name = myInfo.Name;
+
+        list.InsertLast(currentEntry);
+    }
+
     for (uint i = 0; i < friendsJob.FriendList.Length; i++) {
         auto friend = friendsJob.FriendList[i];
+
         if (friend is null) continue;
+
         string id = friend.WebServicesUserId;
-        if (id.Length == 0) id = friend.AccountId;
-        if (id.Length == 0) continue;
         FriendsTime@ entry = FriendsTime();
         entry.id = id;
         entry.name = string(friend.DisplayName);
@@ -161,16 +180,16 @@ void fetchfriends() {
         list.InsertLast(entry);
     }
     game.UserMgr.TaskResult_Release(friendsJob.Id);
-    trace("friend ids " + list.Length);
 
     for (uint first = 0; first < list.Length; first += 50) {
-        if (wanted != seenMap || !Permissions::ViewRecords()) break;
+
+        //if map changed or not allowed to view records then stop
+        if (requestedMap != seenMap || !Permissions::ViewRecords()) break;
         MwFastBuffer<wstring> ids;
         uint end = Math::Min(first + 50, list.Length);
         for (uint i = first; i < end; i++) ids.Add(list[i].id);
-        auto job = game.ScoreMgr.Map_GetPlayerListRecordList(user, ids, wanted, "PersonalBest", "", "TimeAttack", "");
+        auto job = game.ScoreMgr.Map_GetPlayerListRecordList(user, ids, requestedMap, "PersonalBest", "", "TimeAttack", "");
         while (job.IsProcessing) yield();
-        trace("friend records " + job.HasSucceeded + " count " + job.MapRecordList.Length);
         if (job.HasSucceeded && !job.HasFailed) {
             for (uint r = 0; r < job.MapRecordList.Length; r++) {
                 auto record = job.MapRecordList[r];
@@ -183,21 +202,35 @@ void fetchfriends() {
         }
         game.ScoreMgr.TaskResult_Release(job.Id);
     }
-    if (wanted != seenMap || !Permissions::ViewRecords()) {
+
+    //if map changed or not allowed to view records then stop
+    if (requestedMap != seenMap || !Permissions::ViewRecords()) {
         gettingTimes = false;
         return;
     }
 
     for (uint i = 0; i < list.Length; i++) {
         if (list[i].time == 0) continue;
-        list[i].place = getWorldPlace(wanted, list[i].time);
-        trace("friend row " + list[i].name + " time " + list[i].time + " world " + list[i].place);
-        if (wanted != seenMap || !Permissions::ViewRecords()) {
+
+        //this now uses own api to get actual world place for friends/own time
+        list[i].place = getWorldPlace(requestedMap, list[i].time);
+
+
+        Dbg("AS", "Place for time " + list[i].name + " place " + list[i].place);
+
+        Dbg("AS", "friend row " + list[i].name + " time " + list[i].time + " world " + list[i].place);
+
+        //if map changed or not allowed to view records then stop
+        if (requestedMap != seenMap || !Permissions::ViewRecords()) {
             gettingTimes = false;
             return;
         }
     }
+
+    //now temp list updated, set to actual friends so shows
     friends = list;
+
+    //reorder friends based on their time so shows in order
     for (uint i = 0; i < friends.Length; i++) {
         for (uint j = i + 1; j < friends.Length; j++) {
             if (friends[j].time > 0 && (friends[i].time == 0 || friends[j].time < friends[i].time)) {
@@ -207,38 +240,54 @@ void fetchfriends() {
             }
         }
     }
+
+    //now call the manialink hook to reset before sending each row
     MLHook::Queue_MessageManialinkPlayground(page, {"reset"});
+
+    //loop through each row and send message to manialink to add self and friends
     for (uint i = 0; i < friends.Length; i++) {
         if (friends[i].time == 0) continue;
         MLHook::Queue_MessageManialinkPlayground(page, {"row", friends[i].id, friends[i].name, tostring(friends[i].place), tostring(friends[i].time)});
     }
     gettingTimes = false;
     loadedOnce = true;
-    trace("friends shown " + friends.Length);
 }
 
+//use map id and score to get the place in world. set up own server as wouldnt work with my credneitlas.
+//used this project - https://github.com/Banalian/ExtraLeaderboardAPI
 uint getWorldPlace(string map, uint score) {
-    uint64 started = Time::Now;
-    while (!NadeoServices::IsAuthenticated("NadeoLiveServices")) {
-        if (Time::Now - started > 10000 || map != seenMap) return 0;
-        yield();
-    }
-    string url = NadeoServices::BaseURLLive() + "/api/token/leaderboard/group/map?scores[" + map + "]=" + score;
-    string body = '{"maps":[{"mapUid":"' + map + '","groupUid":"Personal_Best"}]}';
-    auto request = NadeoServices::Post("NadeoLiveServices", url, body);
+    string url = "https://extraleaderboardapi.agileapps.uk/ELP/api/leaderboard/map/" + map + "/time?time=" + tostring(score);
+
+    Dbg("AS", "WORLD REQUEST score=" + tostring(score) + " url=" + url);
+
+    auto request = Net::HttpRequest();
+
+    request.Url = url;
+    request.Method = Net::HttpMethod::Get;
     request.Start();
-    while (!request.Finished()) yield();
-    trace("world response " + request.ResponseCode() + " " + request.Error());
-    if (request.ResponseCode() != 200) return 0;
+
+    while (!request.Finished())
+        yield();
+
+    if (map != seenMap)
+        return 0;
+
+    Dbg("AS", "WORLD RESPONSE data=" + request.String());
+
+    if (request.ResponseCode() != 200)
+        return 0;
+
     auto data = Json::Parse(request.String());
-    if (data is null || data.Length == 0) return 0;
-    auto zones = data[0]["zones"];
-    if (zones is null) return 0;
-    for (uint i = 0; i < zones.Length; i++) {
-        if (string(zones[i]["zoneName"]) == "World")
-            return uint(int(zones[i]["ranking"]["position"]));
-    }
-    return 0;
+
+    if (data is null)
+        return 0;
+
+    auto positions = data["positions"];
+
+    if (positions is null || positions.Length == 0)
+        return 0;
+
+    return uint(int(positions[0]["rank"]));
 }
 
 void OnDisabled() { MLHook::UnregisterMLHooksAndRemoveInjectedML(); }
