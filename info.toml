@@ -2,7 +2,7 @@
 name = "Records++"
 author = "danhol86"
 category = "Race"
-version = "1.0.2"
+version = "1.0.3"
 
 [script]
 dependencies = ["MLHook"]
