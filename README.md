@@ -1,8 +1,6 @@
 # Records++
 
-Quick notes on how this works as I will forget otherwise.
-
-Main idea is just to add a FRIENDS tab into the normal Trackmania records UI and show me + my friends times and world positions (maybe add option to toggle this off and show rank vs friends)
+Main idea is to add a FRIENDS tab into the normal Trackmania records UI and show me and friends times and world positions (maybe add option to toggle this off and show rank vs friends)
 
 ## What I used
 
@@ -10,11 +8,11 @@ Openplanet + AngelScript for the main plugin:
 
 https://openplanet.dev/
 
-MLHook to inject/send messages to the ManiaScript:
+MLHook to inject/send messages to the ManiaScript (added as dependency):
 
 https://github.com/openplanet-nl/mlhook
 
-ManiaScriptSharp so I can write the ManiaScript part in C# and have it generate the actual ManiaScript:
+ManiaScriptSharp so I can write the ManiaScript part in C# and have it generate the actual ManiaScript injected into the as file:
 
 https://github.com/BigBang1112/maniascript-sharp
 
@@ -50,17 +48,8 @@ https://extraleaderboardapi.agileapps.uk/ELP
 - adds/updates a `FRIENDS` records section
 - increments `TMGame_Record_ZonesRecordsUpdate` so the normal records UI refreshes
 
-## Build
 
-From the project folder:
-
-```powershell
-.\build.ps1
-```
-
-This builds the C# ManiaScript project, generates the ManiaScript, wraps it into the Openplanet AngelScript and builds the final `.op` file under `build`.
-
-## Install / test locally
+## Testing
 
 Run:
 
@@ -68,28 +57,15 @@ Run:
 .\build.ps1 -Install
 ```
 
-This builds it and copies it into:
+This builds the C# ManiaScript project, generates the ManiaScript, wraps it into the Openplanet AngelScript and builds the final `.op` file under `build`.
+
+Then copies into the users plugins folder for openplanet to pick up
 
 ```
 %USERPROFILE%\OpenplanetNext\Plugins\RecordsPlusPlus
 ```
 
-Then start/reload Openplanet and load a Trackmania map.
-
-Open the normal Records panel and there should be a FRIENDS section showing yourself and any friends who have a time on that map.
-
 There are debug settings in the plugin if need to see what it is doing.
-
-## How to amend
-
-```
-src/Main.as
-ManiaScript/RecordsPlusPlus.ManiaScript/Class1.cs
-info.toml
-```
-
-The generated ManiaScript file comes from the csproj and then I inject into the main .as file
-
 
 ## To do
 
