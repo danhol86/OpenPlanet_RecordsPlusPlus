@@ -1,109 +1,111 @@
+const MYScriptReplacement
+
 const string page = "RecordsPlusPlus_First";
 
-class BuddyTime {
+class FriendsTime {
     string id;
     string name;
     uint time;
     uint place;
 }
 
-array<BuddyTime@> buddies;
+array<FriendsTime@> friends;
 string seenMap = "";
+
+//used to check if already getting times as in a loop
 bool gettingTimes = false;
+
+//if loaded for current map, then dont load again
 bool loadedOnce = false;
 
-const string script = """
- #Include "TextLib" as T
- #Struct K_TMGame_Record_Record { Integer Rank; Text AccountId; Text DisplayName; Integer Score; }
- #Struct K_TMGame_Record_Records { Text ZoneName; Integer WorstScore; Boolean IsFull; Integer Type; K_TMGame_Record_Record[] Records; }
+array<string> debugLines;
 
-main() {
-    declare K_TMGame_Record_Records[] TMGame_Record_ZonesRecords for ClientUI;
-    declare Integer TMGame_Record_ZonesRecordsUpdate for ClientUI;
-    declare Text[][] MLHook_Inbound_RecordsPlusPlus_First for ClientUI = [];
-    declare K_TMGame_Record_Record[] people;
-    declare Boolean enabled = False;
-    declare Boolean changed = False;
-    declare Integer lastUpdate = -1;
-    while (True) {
-        yield;
-        declare Integer x = 0;
-        x = 0;
-        while (x < MLHook_Inbound_RecordsPlusPlus_First.count) {
-            declare Text[] msg;
-            msg = MLHook_Inbound_RecordsPlusPlus_First[x];
-            if (msg.count > 0) {
-                if (msg[0] == "reset") {
-                    people = [];
-                    enabled = True;
-                    changed = True;
-                }
-                if (msg[0] == "row" && msg.count == 5) {
-                    people.add(K_TMGame_Record_Record {
-                        Rank = T::ToInteger(msg[3]),
-                        AccountId = msg[1],
-                        DisplayName = msg[2],
-                        Score = T::ToInteger(msg[4])
-                    });
-                    changed = True;
-                }
-                if (msg[0] == "off") {
-                    enabled = False;
-                    people = [];
-                    changed = True;
-                }
-            }
-            x += 1;
+//settings for debugging only. is this ok in production?
+[Setting category="Debug" name="Show Popup"]
+bool ShowPopup = false;
+
+[Setting category="Debug" name="Enable debugging"]
+bool DebugEnabled = false;
+
+//add logs to the trace (shown in logs tab in Openplanet) then also log seperately to show in new debug popup
+void Dbg(const string &in source, const string &in message) {
+    if (!DebugEnabled) return;
+
+    string line =
+        "[" + tostring(Time::Now) + "] [" + source + "] " + message;
+
+    // Openplanet log
+    trace(line);
+
+    // log line to show in popup
+    debugLines.InsertLast(line);
+}
+
+class ScriptDebugHook : MLHook::HookMLEventsByType {
+    ScriptDebugHook() {
+        super("RecordsPlusPlus_Debug");
+    }
+
+    void OnEvent(MLHook::PendingEvent@ event) override {
+        string msg = "";
+
+        for (uint i = 0; i < event.data.Length; i++) {
+            if (i > 0)
+                msg += " | ";
+
+            msg += string(event.data[i]);
         }
-        MLHook_Inbound_RecordsPlusPlus_First = [];
-        declare Integer found = -1;
-        found = -1;
-        x = 0;
-        while (x < TMGame_Record_ZonesRecords.count) {
-            if (TMGame_Record_ZonesRecords[x].ZoneName == "FRIENDS") found = x;
-            x += 1;
-        }
-        if (enabled && TMGame_Record_ZonesRecords.count > 0 && (changed || found < 0 || lastUpdate != TMGame_Record_ZonesRecordsUpdate)) {
-            declare Integer worst = 0;
-            worst = 0;
-            x = 0;
-            while (x < people.count) {
-                if (people[x].Score > worst) worst = people[x].Score;
-                x += 1;
-            }
-            declare K_TMGame_Record_Records friends;
-            friends = K_TMGame_Record_Records {
-                ZoneName = "FRIENDS", WorstScore = worst, IsFull = True, Type = 1, Records = people
-            };
-            if (found >= 0) {
-                TMGame_Record_ZonesRecords[found] = friends;
-            } else {
-                declare K_TMGame_Record_Records[] zones;
-                zones = [];
-                zones.add(TMGame_Record_ZonesRecords[0]);
-                zones.add(friends);
-                x = 1;
-                while (x < TMGame_Record_ZonesRecords.count) {
-                    zones.add(TMGame_Record_ZonesRecords[x]);
-                    x += 1;
-                }
-                TMGame_Record_ZonesRecords = zones;
-            }
-            TMGame_Record_ZonesRecordsUpdate += 1;
-            changed = False;
-        }
-        if (!enabled && found >= 0) {
-            TMGame_Record_ZonesRecords.removekey(found);
-            TMGame_Record_ZonesRecordsUpdate += 1;
-            changed = False;
-        }
-        lastUpdate = TMGame_Record_ZonesRecordsUpdate;
+
+        Dbg("MANIASCRIPT", msg);
     }
 }
-""";
+
+void Render() {
+
+    if(!ShowPopup) {
+        return;
+    }
+
+    UI::SetNextWindowSize(900, 550, UI::Cond::FirstUseEver);
+
+    UI::Begin("Records++ Debug");
+
+    UI::Text("Map: " + seenMap);
+    UI::Text(
+        "gettingTimes=" + tostring(gettingTimes)
+        + " loadedOnce=" + tostring(loadedOnce)
+        + " friends=" + tostring(friends.Length)
+    );
+
+    UI::Separator();
+
+    uint start = debugLines.Length > 40
+        ? debugLines.Length - 40
+        : 0;
+
+    for (uint i = start; i < debugLines.Length; i++)
+        UI::TextWrapped(debugLines[i]);
+
+
+    UI::End();
+}
+
+
+ScriptDebugHook@ scriptDebugHook;
 
 void Main() {
+
+    Dbg("AS", "PLUGIN START");
+
+    @scriptDebugHook = ScriptDebugHook();
+    MLHook::RegisterMLHook(
+            scriptDebugHook,
+            "RecordsPlusPlus_Debug",
+            true
+        );
+
     NadeoServices::AddAudience("NadeoLiveServices");
+
     MLHook::InjectManialinkToPlayground(page, script, true);
     while (true) {
         auto app = GetApp();
@@ -113,19 +115,22 @@ void Main() {
         if (map != seenMap) {
             seenMap = map;
             loadedOnce = false;
-            buddies.Resize(0);
-            if (map.Length == 0) MLHook::Queue_MessageManialinkPlayground(page, {"off"});
-            else MLHook::Queue_MessageManialinkPlayground(page, {"reset"});
+            friends.Resize(0);
+            if (map.Length == 0) {
+                MLHook::Queue_MessageManialinkPlayground(page, {"off"});
+            } else {
+                MLHook::Queue_MessageManialinkPlayground(page, {"reset"});
+            }
         }
         if (map.Length > 0 && !gettingTimes && !loadedOnce) {
             gettingTimes = true;
-            startnew(fetchBuddies);
+            startnew(fetchfriends);
         }
         sleep(1000);
     }
 }
 
-void fetchBuddies() {
+void fetchfriends() {
     string wanted = seenMap;
     trace("friends map " + wanted);
     auto game = cast<CSmArenaRulesMode>(GetApp().PlaygroundScript);
@@ -142,14 +147,14 @@ void fetchBuddies() {
         gettingTimes = false;
         return;
     }
-    array<BuddyTime@> list;
+    array<FriendsTime@> list;
     for (uint i = 0; i < friendsJob.FriendList.Length; i++) {
         auto friend = friendsJob.FriendList[i];
         if (friend is null) continue;
         string id = friend.WebServicesUserId;
         if (id.Length == 0) id = friend.AccountId;
         if (id.Length == 0) continue;
-        BuddyTime@ entry = BuddyTime();
+        FriendsTime@ entry = FriendsTime();
         entry.id = id;
         entry.name = string(friend.DisplayName);
         if (entry.name.Length == 0) entry.name = id;
@@ -192,24 +197,24 @@ void fetchBuddies() {
             return;
         }
     }
-    buddies = list;
-    for (uint i = 0; i < buddies.Length; i++) {
-        for (uint j = i + 1; j < buddies.Length; j++) {
-            if (buddies[j].time > 0 && (buddies[i].time == 0 || buddies[j].time < buddies[i].time)) {
-                BuddyTime@ swap = buddies[i];
-                @buddies[i] = buddies[j];
-                @buddies[j] = swap;
+    friends = list;
+    for (uint i = 0; i < friends.Length; i++) {
+        for (uint j = i + 1; j < friends.Length; j++) {
+            if (friends[j].time > 0 && (friends[i].time == 0 || friends[j].time < friends[i].time)) {
+                FriendsTime@ swap = friends[i];
+                @friends[i] = friends[j];
+                @friends[j] = swap;
             }
         }
     }
     MLHook::Queue_MessageManialinkPlayground(page, {"reset"});
-    for (uint i = 0; i < buddies.Length; i++) {
-        if (buddies[i].time == 0) continue;
-        MLHook::Queue_MessageManialinkPlayground(page, {"row", buddies[i].id, buddies[i].name, tostring(buddies[i].place), tostring(buddies[i].time)});
+    for (uint i = 0; i < friends.Length; i++) {
+        if (friends[i].time == 0) continue;
+        MLHook::Queue_MessageManialinkPlayground(page, {"row", friends[i].id, friends[i].name, tostring(friends[i].place), tostring(friends[i].time)});
     }
     gettingTimes = false;
     loadedOnce = true;
-    trace("friends shown " + buddies.Length);
+    trace("friends shown " + friends.Length);
 }
 
 uint getWorldPlace(string map, uint score) {

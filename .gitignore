@@ -1,3 +1,14 @@
 build/
 reference/
 .openplanet-lsp-cache/
+bin/
+obj/
+data/
+browser-test/
+.vs/
+*.user
+*.suo
+.DS_Store
+Generated/
+MyScript.as 
+out/

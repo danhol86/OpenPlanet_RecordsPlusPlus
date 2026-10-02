@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+
+		<ManiaScriptOutputDir>Generated</ManiaScriptOutputDir>
+		<ManiaScriptAdditionalOutputDirs>..\..\src\Generated</ManiaScriptAdditionalOutputDirs>
+		<ManiaScriptVersion>2</ManiaScriptVersion>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="ManiaScriptSharp" Version="1.0.0-beta.3" />
+		<PackageReference Include="ManiaScriptSharp.Generator" Version="1.0.0-beta.3" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<PackageReference Include="ManiaScriptSharp.Trackmania" Version="1.0.0-beta.3" />
+
+	</ItemGroup>
+
+</Project>

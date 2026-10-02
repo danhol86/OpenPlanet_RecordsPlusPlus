@@ -1,5 +1,5 @@
 Add friends tab to scores - done
-Load actual friends and times - todo (decs)
+Load actual friends and times - done
 Ignore friends no times - todo
 Sort fastest to slowest - todo
 Show my PC at top of list simliar to other tabs - todo
