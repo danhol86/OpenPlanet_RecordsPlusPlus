@@ -67,6 +67,6 @@ There are debug settings in the plugin if need to see what it is doing.
 
 ## To do
 
-Work out best way to inject the generated file 
-Selecting friend doesnt show ghost yet
-Allow to manually add other friends/filter out who want to see if have multiple friends
+- Work out best way to inject the generated file 
+- Selecting friend doesnt show ghost yet
+- Allow to manually add other friends/filter out who want to see if have multiple friends
