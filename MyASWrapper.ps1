@@ -1,5 +1,5 @@
 $InputFile = Join-Path $PSScriptRoot 'src\Generated\FriendsRecords.Script.txt'
-$OutputFile = Join-Path $PSScriptRoot 'src\MyScript.as'
+$OutputFile = Join-Path $PSScriptRoot 'src\Generated\FriendsRecords.as'
 
 $script = [System.IO.File]::ReadAllText($InputFile)
 

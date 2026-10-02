@@ -1,5 +1,6 @@
 param(
-    [switch]$Install
+    [switch]$Install,
+    [switch]$Production
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,20 +40,31 @@ if (Test-Path -LiteralPath $StageDir) { Remove-Item -LiteralPath $StageDir -Recu
 if (Test-Path -LiteralPath $Output) { Remove-Item -LiteralPath $Output -Force }
 New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 
-$MainPath = Join-Path $ProjectRoot 'src\Main.as'
-$MyScriptPath = Join-Path $ProjectRoot 'src\MyScript.as'
-$StageMainPath = Join-Path $StageDir 'Main.as'
+$SourceDir = Join-Path $ProjectRoot 'src'
+$SourcePrefix = $SourceDir.TrimEnd('\') + '\'
 
-$MainSource = Get-Content -LiteralPath $MainPath -Raw
-$MyScriptSource = Get-Content -LiteralPath $MyScriptPath -Raw
+# Openplanet compiles all .as files in the plugin together, including files in
+# sub-folders. Copy the source tree as separate files instead of combining it
+# all into Main.as.
+Get-ChildItem -Path $SourceDir -Recurse -File -Filter '*.as' | ForEach-Object {
+    $RelativePath = $_.FullName.Substring($SourcePrefix.Length)
 
-$MainSource = $MainSource.Replace("const MYScriptReplacement", $MyScriptSource.TrimEnd())
+    # during dev, ignore the prod.as
+    if (-not $Production -and $RelativePath -eq 'Debug\DebugProd.as') {
+        return
+    }
 
-[System.IO.File]::WriteAllText(
-    $StageMainPath,
-    $MainSource,
-    [System.Text.UTF8Encoding]::new($false)
-)
+    # during prod, ignore the debug.as
+    if ($Production -and $RelativePath -eq 'Debug\Debug.as') {
+        return
+    }
+
+    $Destination = Join-Path $StageDir $RelativePath
+    $DestinationDir = Split-Path -Parent $Destination
+
+    New-Item -ItemType Directory -Force -Path $DestinationDir | Out-Null
+    Copy-Item -LiteralPath $_.FullName -Destination $Destination
+}
 
 Copy-Item -LiteralPath $InfoPath -Destination (Join-Path $StageDir 'info.toml')
 
