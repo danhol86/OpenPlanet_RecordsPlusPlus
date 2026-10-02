@@ -46,8 +46,6 @@ https://extraleaderboardapi.agileapps.uk/ELP
 - this is C# but ManiaScriptSharp converts it to ManiaScript
 - reads the normal Trackmania `TMGame_Record_ZonesRecords`
 - adds/updates a `FRIENDS` records section
-- increments `TMGame_Record_ZonesRecordsUpdate` so the normal records UI refreshes
-
 
 ## Testing
 
